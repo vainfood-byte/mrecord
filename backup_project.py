@@ -1,4 +1,5 @@
-"""프로젝트 소스를 복구 가능한 ZIP으로 백업합니다."""
+#!/usr/bin/env python3
+"""Create a recoverable ZIP backup of the Mrecord project (sources + config)."""
 
 from __future__ import annotations
 
@@ -6,81 +7,78 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-# 백업에서 제외할 디렉터리 / 파일 이름
-EXCLUDE_DIR_NAMES = {
+ROOT = Path(__file__).resolve().parent
+
+# Directory / file name segments to skip anywhere in the relative path
+IGNORE_NAMES = {
     "node_modules",
     ".git",
     "dist",
     "build",
     "out",
-    "release",
     ".cache",
+    "cache",
     "temp",
     "tmp",
-    ".vite",
+    ".tmp",
     ".turbo",
+    ".vite",
     "coverage",
+    ".nyc_output",
     "__pycache__",
+    ".pytest_cache",
     ".idea",
     ".vscode",
+    ".DS_Store",
+    "Thumbs.db",
+    ".electron-vite",
+    "release",
+    "releases",
 }
 
-EXCLUDE_FILE_SUFFIXES = {
-    ".zip",
-    ".log",
-    ".pyc",
-}
-
-def should_skip_dir(name: str) -> bool:
-    return name in EXCLUDE_DIR_NAMES or name.startswith(".git")
+# Skip previous backup archives in the project root
+IGNORE_SUFFIXES = {".zip"}
+IGNORE_PREFIXES = ("backup_",)
 
 
-def should_skip_file(path: Path) -> bool:
-    name = path.name.lower()
-    suffix = path.suffix.lower()
-    if suffix == ".zip" and name.startswith("backup_"):
+def should_ignore(rel: Path) -> bool:
+    parts = rel.parts
+    if any(part in IGNORE_NAMES for part in parts):
         return True
-    if suffix in {".log", ".pyc"}:
+    name = rel.name
+    if name.startswith(IGNORE_PREFIXES) and rel.suffix.lower() in IGNORE_SUFFIXES:
         return True
+    if name == Path(__file__).name:
+        # Keep the backup script itself in the archive
+        return False
     return False
 
 
-def create_backup(project_root: Path) -> tuple[Path, int]:
+def main() -> None:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     zip_name = f"backup_{stamp}.zip"
-    zip_path = project_root / zip_name
+    zip_path = ROOT / zip_name
 
     file_count = 0
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in project_root.rglob("*"):
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for path in sorted(ROOT.rglob("*")):
             if not path.is_file():
                 continue
-
-            rel = path.relative_to(project_root)
-            # 제외 디렉터리 경로 검사
-            if any(should_skip_dir(part) for part in rel.parts[:-1]):
+            rel = path.relative_to(ROOT)
+            if should_ignore(rel):
                 continue
-            if should_skip_file(path):
-                continue
-            # 방금 쓰는 zip 자신은 건너뜀
+            # Do not nest the zip we are writing
             if path.resolve() == zip_path.resolve():
                 continue
-
             zf.write(path, arcname=str(rel).replace("\\", "/"))
             file_count += 1
 
-    return zip_path, file_count
-
-
-def main() -> None:
-    root = Path(__file__).resolve().parent
-    zip_path, file_count = create_backup(root)
     size_mb = zip_path.stat().st_size / (1024 * 1024)
-    print("백업 완료")
-    print(f"파일명: {zip_path.name}")
-    print(f"경로: {zip_path}")
-    print(f"포함 파일 수: {file_count}")
-    print(f"크기: {size_mb:.2f} MB")
+    print("Backup complete.")
+    print(f"  File : {zip_name}")
+    print(f"  Path : {zip_path}")
+    print(f"  Files: {file_count}")
+    print(f"  Size : {size_mb:.2f} MB")
 
 
 if __name__ == "__main__":
