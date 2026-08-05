@@ -1,0 +1,21 @@
+{
+  "name": "mrecord",
+  "version": "1.1.3",
+  "description": "My Record (마이리코드) - 콘텐츠 기록 프로그램",
+  "main": "./out/main/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vainfood-byte/mrecord.git"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0",
+    "electron-updater": "^6.8.9",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.2",
+    "lucide-react": "^0.469.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-window": "^2.3.0",
+    "virtua": "^0.50.0"
+  }
+}

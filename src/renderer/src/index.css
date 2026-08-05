@@ -1,0 +1,783 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Bookk Myungjo';
+  src: url('/fonts/BookkMyungjo_Bold.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Mabinogi Classic';
+  src: url('/fonts/Mabinogi_Classic_TTF.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Paperlogy';
+  src: url('/fonts/Paperlogy-5Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --color-bg: #faf8f3;
+  --color-bg-panel: #f5f1e5;
+  --color-bg-card: #ffffff;
+  --color-bg-sub-panel: #ffffff;
+  --color-text: #745039;
+  --color-text-muted: #9a8070;
+  --color-accent: #745039;
+  --color-border: #e8e2d6;
+  --color-sidebar: #f5f1e5;
+  --bg-color: #faf8f3;
+  --text-color: #745039;
+  --border-color: #e8e2d6;
+  --bg-color-rgb: 250, 248, 243;
+  --panel-bg-rgb: 245, 241, 229;
+  --subpanel-bg-rgb: 255, 255, 255;
+  --font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+#root {
+  transform: scale(var(--ui-scale, 1));
+  transform-origin: top left;
+  width: calc(100% / var(--ui-scale, 1));
+  height: calc(100% / var(--ui-scale, 1));
+}
+
+#overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100010;
+  pointer-events: none;
+}
+
+#overlay-root > * {
+  pointer-events: auto;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input[type='color'] {
+  -webkit-appearance: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type='color']::-webkit-color-swatch {
+  border: 2px solid var(--color-border);
+  border-radius: 999px;
+}
+
+input[type='range'] {
+  accent-color: var(--color-accent);
+}
+
+[contenteditable]:empty:before {
+  content: attr(data-placeholder);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+/* 글자 크기 설정 — 공통 텍스트 유틸을 --font-size 기준으로 스케일 */
+@layer utilities {
+  .text-\[10px\] {
+    font-size: calc(var(--font-size) * 0.7142857) !important;
+  }
+  .text-xs {
+    font-size: calc(var(--font-size) * 0.8571429) !important;
+  }
+  .text-sm {
+    font-size: var(--font-size) !important;
+  }
+  .text-base {
+    font-size: calc(var(--font-size) * 1.1428571) !important;
+  }
+  .text-lg {
+    font-size: calc(var(--font-size) * 1.2857143) !important;
+  }
+  .text-xl {
+    font-size: calc(var(--font-size) * 1.4285714) !important;
+  }
+}
+
+[data-detail-panel] input,
+[data-detail-panel] textarea,
+[data-detail-panel] select,
+[data-detail-panel] [contenteditable],
+[data-settings-panel] input,
+[data-settings-panel] textarea,
+[data-settings-panel] select,
+main input,
+main textarea,
+main select {
+  font-size: var(--font-size);
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+@keyframes export-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.export-progress-indeterminate {
+  animation: export-progress-slide 1.1s ease-in-out infinite;
+}
+
+/* 메모 카드 — [컬러>테마]는 CSS 변수를 따라 사용자 테마 변경에 즉시 반영 */
+[data-memo-color='theme'][data-memo-gradient] {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-bg) 92%, transparent) 0%,
+    color-mix(in srgb, var(--color-bg) 50%, transparent) 65%,
+    transparent 100%
+  );
+}
+
+/* 메모형 v2 카드모드:테마 — 중앙 텍스트 박스 (배경색 RGB + 반투명) */
+[data-memo-color='theme'][data-memo-panel] {
+  background: rgba(var(--bg-color-rgb), 0.6);
+  color: var(--text-color, var(--color-text));
+}
+
+[data-memo-color='theme'][data-memo-text] {
+  color: var(--text-color, var(--color-text));
+}
+
+/* ========== UI 스타일 (html[data-ui-style]) — CSS만, 핵심 로직/DOM 무수정 ========== */
+
+/* --- default: 기존 모던 레이아웃 유지 --- */
+html[data-ui-style='default'] {
+}
+
+/* --- glass --- */
+html[data-ui-style='glass'] [data-settings-panel],
+html[data-ui-style='glass'] [data-detail-panel],
+html[data-ui-style='glass'] [data-trace-box],
+html[data-ui-style='glass'] [data-property-remote],
+html[data-ui-style='glass'] [data-lock-dialog] {
+  background: rgba(var(--panel-bg-rgb), 0.65) !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-color: var(--border-color, var(--color-border)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+/*
+ * 팝업 dismiss용 전체 화면 오버레이 — 블러 금지
+ * (data-export-popup 이 fixed inset-0 백드롭에 붙어 화면 전체가 먹통처럼 흐려지던 원인)
+ */
+html[data-ui-style='glass'] #overlay-root,
+html[data-ui-style='glass'] [data-export-popup] {
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+/* 실제 메뉴/팝업 박스에만 글래스 블러 */
+html[data-ui-style='glass'] [data-popup-root] {
+  background: rgba(var(--panel-bg-rgb), 0.65) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  backdrop-filter: blur(12px) !important;
+  border-color: var(--border-color, var(--color-border)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* 기록 패널: 배경색 반투명 */
+html[data-ui-style='glass'] [data-record-export-root] {
+  background: rgba(var(--bg-color-rgb), 0.65) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-color: var(--border-color, var(--color-border)) !important;
+}
+
+/* 캘린더 전체/헤더: 서브패널 반투명 */
+html[data-ui-style='glass'] [data-calendar-root],
+html[data-ui-style='glass'] [data-calendar-export-root] {
+  background: rgba(var(--subpanel-bg-rgb), 0.55) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-color: var(--border-color, var(--color-border)) !important;
+}
+
+html[data-ui-style='glass'] [data-calendar-header] {
+  background: rgba(var(--subpanel-bg-rgb), 0.55) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-radius: 0.5rem;
+}
+
+/*
+ * 갤러리/메모: 래퍼에는 스타일 금지 → 실제 카드(*-export) 1곳에만 글래스
+ * (래퍼+내부 이중 적용이 2중 그림자/모서리 삐짐 원인)
+ */
+html[data-ui-style='glass'] [data-gallery-card],
+html[data-ui-style='glass'] [data-memo-card] {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  overflow: visible !important;
+}
+
+html[data-ui-style='glass'] [data-gallery-card-export],
+html[data-ui-style='glass'] [data-memo-card-export],
+html[data-ui-style='glass'] [data-tag-block] {
+  background: rgba(var(--subpanel-bg-rgb), 0.55) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--border-color, var(--color-border)) 55%, transparent) !important;
+  border-radius: 0.75rem !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
+}
+
+html[data-ui-style='glass'] [data-gallery-card-export]:hover,
+html[data-ui-style='glass'] [data-memo-card-export]:hover {
+  transform: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
+}
+
+/* 제목/서브패널: 배경·테두리·그림자·라운드 전부 제거 (카드 컨테이너만 담당) */
+html[data-ui-style='glass'] [data-gallery-title-bar],
+html[data-ui-style='glass'] [data-memo-title-bar] {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  border-width: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* 메모형 v2 테마 패널: 글래스 UI에서도 중앙 박스 배경 유지 (투명 덮어쓰기 금지) */
+html[data-ui-style='glass'] [data-memo-color='theme'][data-memo-panel] {
+  background: rgba(var(--bg-color-rgb), 0.6) !important;
+  background-color: rgba(var(--bg-color-rgb), 0.6) !important;
+  color: var(--text-color, var(--color-text)) !important;
+  box-shadow: none !important;
+}
+
+/* 컬러 메모 패널(블랙/화이트 등): 이중 그림자만 제거 — 배경은 기존 유지 */
+html[data-ui-style='glass'] [data-memo-panel]:not([data-memo-color='theme']) {
+  box-shadow: none !important;
+}
+
+/* 감상박스 본문 */
+html[data-ui-style='glass'] [data-export-review='true'],
+html[data-ui-style='glass'] [data-detail-panel] div.rounded-xl:has([data-export-review='true']) {
+  background: rgba(var(--subpanel-bg-rgb), 0.65) !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-color: var(--border-color, var(--color-border)) !important;
+}
+
+html[data-ui-style='glass'] [data-trace-widget],
+html[data-ui-style='glass'] [data-trace-dialog] {
+  background: rgba(var(--subpanel-bg-rgb), 0.6) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-color: var(--border-color, var(--color-border)) !important;
+}
+
+/* 속성바: 전체 블러 금지 → 개별 버튼/탭만 */
+html[data-ui-style='glass'] [data-tab-bar] {
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-ui-style='glass'] [data-tab-bar] [data-add-record],
+html[data-ui-style='glass'] [data-tab-bar] nav button {
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+html[data-ui-style='glass'] [data-tab-bar] nav button:not([class*='bg-[var(--color-accent)]']) {
+  background: rgba(var(--panel-bg-rgb), 0.55) !important;
+  border: 1px solid color-mix(in srgb, var(--border-color, var(--color-border)) 70%, transparent);
+}
+
+html[data-ui-style='glass'] [data-tab-bar] [data-add-record] {
+  background: rgba(var(--panel-bg-rgb), 0.55) !important;
+}
+
+/* --- retro: 내부 이중 테두리/그림자 제거 + 최상위 단일 직각만 --- */
+html[data-ui-style='retro'] .shadow-sm,
+html[data-ui-style='retro'] .shadow,
+html[data-ui-style='retro'] .shadow-md,
+html[data-ui-style='retro'] .shadow-lg,
+html[data-ui-style='retro'] .shadow-xl,
+html[data-ui-style='retro'] .shadow-2xl,
+html[data-ui-style='retro'] .shadow-inner {
+  box-shadow: none !important;
+}
+
+html[data-ui-style='retro'] .rounded,
+html[data-ui-style='retro'] .rounded-sm,
+html[data-ui-style='retro'] .rounded-md,
+html[data-ui-style='retro'] .rounded-lg,
+html[data-ui-style='retro'] .rounded-xl,
+html[data-ui-style='retro'] .rounded-2xl,
+html[data-ui-style='retro'] .rounded-3xl {
+  border-radius: 0 !important;
+}
+
+/* 갤러리/메모 래퍼: 테두리·그림자 절대 금지 (실제 카드 export에만 적용) */
+html[data-ui-style='retro'] [data-gallery-card],
+html[data-ui-style='retro'] [data-memo-card] {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  outline: none !important;
+}
+
+/* 카드 내부: 그림자/라운드/이중테두리 제거 */
+html[data-ui-style='retro'] [data-gallery-card-export] *,
+html[data-ui-style='retro'] [data-memo-card-export] *,
+html[data-ui-style='retro'] [data-tag-block] *,
+html[data-ui-style='retro'] [data-calendar-root] *,
+html[data-ui-style='retro'] [data-record-export-root] * {
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+html[data-ui-style='retro'] [data-gallery-card-export]::before,
+html[data-ui-style='retro'] [data-gallery-card-export]::after,
+html[data-ui-style='retro'] [data-memo-card-export]::before,
+html[data-ui-style='retro'] [data-memo-card-export]::after,
+html[data-ui-style='retro'] [data-tag-block]::before,
+html[data-ui-style='retro'] [data-tag-block]::after {
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+}
+
+/* 제목 서브패널: 배경·테두리·그림자 완전 해제 */
+html[data-ui-style='retro'] [data-gallery-title-bar],
+html[data-ui-style='retro'] [data-memo-title-bar] {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-width: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+html[data-ui-style='retro'] [data-memo-color='theme'][data-memo-panel],
+html[data-ui-style='retro'] [data-memo-panel] {
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+html[data-ui-style='retro'] [data-memo-cover],
+html[data-ui-style='retro'] [data-gallery-cover],
+html[data-ui-style='retro'] [data-tag-block-scroll],
+html[data-ui-style='retro'] [data-tag-block-header],
+html[data-ui-style='retro'] [data-tag-record-item] {
+  border: none !important;
+  border-width: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* 최상위 시각 박스에만 단일 직각 테두리 + 단색 그림자 1개 */
+html[data-ui-style='retro'] [data-settings-panel],
+html[data-ui-style='retro'] [data-detail-panel],
+html[data-ui-style='retro'] [data-trace-box],
+html[data-ui-style='retro'] [data-property-remote],
+html[data-ui-style='retro'] [data-lock-dialog],
+html[data-ui-style='retro'] [data-export-popup],
+html[data-ui-style='retro'] [data-popup-root],
+html[data-ui-style='retro'] [data-calendar-root],
+html[data-ui-style='retro'] [data-calendar-export-root],
+html[data-ui-style='retro'] [data-record-export-root],
+html[data-ui-style='retro'] [data-trace-widget],
+html[data-ui-style='retro'] [data-trace-dialog],
+html[data-ui-style='retro'] [data-export-review='true'],
+html[data-ui-style='retro'] [data-detail-panel] div.rounded-xl:has([data-export-review='true']) {
+  border-radius: 0 !important;
+  border: 2px solid var(--border-color, var(--color-border)) !important;
+  outline: none !important;
+  box-shadow: 4px 4px 0 var(--border-color, var(--color-border)) !important;
+}
+
+/* 갤러리/메모/태그 카드만 overflow clip — 모서리 삐짐 방지 */
+html[data-ui-style='retro'] [data-gallery-card-export],
+html[data-ui-style='retro'] [data-memo-card-export],
+html[data-ui-style='retro'] [data-tag-block] {
+  border-radius: 0 !important;
+  border: 2px solid var(--border-color, var(--color-border)) !important;
+  outline: none !important;
+  overflow: hidden !important;
+  box-shadow: 4px 4px 0 var(--border-color, var(--color-border)) !important;
+}
+
+html[data-ui-style='retro'] [data-gallery-card-export]:hover,
+html[data-ui-style='retro'] [data-memo-card-export]:hover {
+  transform: none !important;
+  box-shadow: 4px 4px 0 var(--border-color, var(--color-border)) !important;
+}
+
+html[data-ui-style='retro'] [data-tab-bar] [data-add-record],
+html[data-ui-style='retro'] [data-tab-bar] nav button {
+  border-radius: 0 !important;
+  border: 2px solid var(--border-color, var(--color-border)) !important;
+  box-shadow: 4px 4px 0 var(--border-color, var(--color-border)) !important;
+}
+
+html[data-ui-style='retro'] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+}
+
+/*
+ * 내보내기 템플릿 전용 레트로 교정
+ * — 캡처 시에만 root에 data-ui-style 이 주입되므로 일반 화면 카드에는 미적용
+ */
+/*
+ * 내보내기 전용: html2canvas box-shadow 연산 우회 → 비대칭 border로 레트로 그림자 재현
+ * (앱 화면 html[data-ui-style='retro'] 카드의 box-shadow는 그대로 유지)
+ */
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card-export],
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card-export],
+[data-tag-export-root][data-ui-style='retro'] [data-tag-block] {
+  box-sizing: border-box !important;
+  border-radius: 0px !important;
+  outline: none !important;
+  overflow: hidden !important;
+  box-shadow: none !important;
+  border-top: 2px solid var(--border-color, var(--color-border)) !important;
+  border-left: 2px solid var(--border-color, var(--color-border)) !important;
+  border-right: 5px solid var(--border-color, var(--color-border)) !important;
+  border-bottom: 5px solid var(--border-color, var(--color-border)) !important;
+}
+
+/* 그림자 공간: 래퍼 padding 대신 그리드 row-gap + 하단 패딩으로 확보 */
+[data-gallery-export-root][data-ui-style='retro'],
+[data-memo-export-root][data-ui-style='retro'] {
+  align-items: start !important;
+  justify-items: start !important;
+  row-gap: 16px !important;
+  padding-bottom: 20px !important;
+}
+
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card],
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card] {
+  position: relative;
+  z-index: auto;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+  align-self: start;
+}
+
+/*
+ * 아랫줄이 위에 오도록 행 단위 z-index (!important로 인라인 역순 스택 덮어씀)
+ * — 14·15행 타이틀이 윗줄 카드 배경에 가려지지 않게 함
+ * (10열 기준 1행 → z 1 … 15행 → z 15)
+ */
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(-n + 10),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(-n + 10) {
+  z-index: 1 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 11):nth-child(-n + 20),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 11):nth-child(-n + 20) {
+  z-index: 2 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 21):nth-child(-n + 30),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 21):nth-child(-n + 30) {
+  z-index: 3 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 31):nth-child(-n + 40),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 31):nth-child(-n + 40) {
+  z-index: 4 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 41):nth-child(-n + 50),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 41):nth-child(-n + 50) {
+  z-index: 5 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 51):nth-child(-n + 60),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 51):nth-child(-n + 60) {
+  z-index: 6 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 61):nth-child(-n + 70),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 61):nth-child(-n + 70) {
+  z-index: 7 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 71):nth-child(-n + 80),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 71):nth-child(-n + 80) {
+  z-index: 8 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 81):nth-child(-n + 90),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 81):nth-child(-n + 90) {
+  z-index: 9 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 91):nth-child(-n + 100),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 91):nth-child(-n + 100) {
+  z-index: 10 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 101):nth-child(-n + 110),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 101):nth-child(-n + 110) {
+  z-index: 11 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 111):nth-child(-n + 120),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 111):nth-child(-n + 120) {
+  z-index: 12 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 121):nth-child(-n + 130),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 121):nth-child(-n + 130) {
+  z-index: 13 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 131):nth-child(-n + 140),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 131):nth-child(-n + 140) {
+  z-index: 14 !important;
+}
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-card]:nth-child(n + 141),
+[data-memo-export-root][data-ui-style='retro'] [data-memo-card]:nth-child(n + 141) {
+  z-index: 15 !important;
+}
+
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-cover],
+[data-memo-export-root][data-ui-style='retro'] [data-memo-cover],
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-title-bar],
+[data-memo-export-root][data-ui-style='retro'] [data-memo-title-bar] {
+  border-radius: 0px !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  position: relative;
+}
+
+/* 표지 wrapper/img — 비대칭 border 안쪽에 밀착, 밖으로 삐짐 방지 */
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-cover],
+[data-memo-export-root][data-ui-style='retro'] [data-memo-cover] {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+[data-gallery-export-root][data-ui-style='retro'] [data-gallery-cover] img,
+[data-memo-export-root][data-ui-style='retro'] [data-memo-cover] img {
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  vertical-align: top;
+  object-fit: cover !important;
+}
+
+/*
+ * 기본 모드 내보내기 캡처 전용 — 회색 제목/카드 박스 제거 + 표지 상단 12px 라운드
+ * (화면 UI·glass/retro 미적용: data-ui-style 주입 시에만)
+ */
+[data-gallery-export-root][data-ui-style='default'] [data-gallery-card-export],
+[data-memo-export-root][data-ui-style='default'] [data-memo-card-export] {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+[data-gallery-export-root][data-ui-style='default'] [data-gallery-title-bar],
+[data-memo-export-root][data-ui-style='default'] [data-memo-title-bar] {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* 내보내기 캡처 중에만 — 타이틀 박스를 화면 카드(px-2 py-2, left)와 동기화 */
+[data-gallery-export-root][data-export-title-size] [data-gallery-title-bar],
+[data-memo-export-root][data-export-title-size] [data-memo-title-bar] {
+  text-align: left !important;
+  padding: 8px !important;
+  box-sizing: border-box !important;
+  height: auto !important;
+  max-height: none !important;
+  line-height: 1.35 !important;
+}
+
+[data-gallery-export-root][data-export-title-size] [data-gallery-title],
+[data-gallery-export-root][data-export-title-size] [data-gallery-title-bar] [data-inline-edit],
+[data-memo-export-root][data-export-title-size] [data-memo-title],
+[data-memo-export-root][data-export-title-size] [data-memo-title-bar] [data-inline-edit] {
+  text-align: left !important;
+  white-space: normal !important;
+  word-break: keep-all !important;
+  overflow-wrap: break-word !important;
+  line-height: 1.35 !important;
+  max-height: none !important;
+  height: auto !important;
+  transform: none !important;
+}
+
+/* 화면에서 center인 메모 타이틀만 예외 */
+[data-memo-export-root][data-export-title-size] [data-memo-title].text-center {
+  text-align: center !important;
+}
+
+[data-gallery-export-root][data-export-title-size='small'] [data-gallery-title],
+[data-gallery-export-root][data-export-title-size='small'] [data-gallery-title-bar] [data-inline-edit],
+[data-memo-export-root][data-export-title-size='small'] [data-memo-title],
+[data-memo-export-root][data-export-title-size='small'] [data-memo-title-bar] [data-inline-edit] {
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+}
+
+[data-gallery-export-root][data-export-title-size='medium'] [data-gallery-title],
+[data-gallery-export-root][data-export-title-size='medium'] [data-gallery-title-bar] [data-inline-edit],
+[data-memo-export-root][data-export-title-size='medium'] [data-memo-title],
+[data-memo-export-root][data-export-title-size='medium'] [data-memo-title-bar] [data-inline-edit] {
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+}
+
+[data-gallery-export-root][data-export-title-size='large'] [data-gallery-title],
+[data-gallery-export-root][data-export-title-size='large'] [data-gallery-title-bar] [data-inline-edit],
+[data-memo-export-root][data-export-title-size='large'] [data-memo-title],
+[data-memo-export-root][data-export-title-size='large'] [data-memo-title-bar] [data-inline-edit] {
+  font-size: 17px !important;
+  line-height: 1.35 !important;
+}
+
+/*
+ * 기록 테이블 내보내기 캡처 중에만 (root에 data-ui-style 주입 시)
+ * — 화면의 data-record-export-root 상시 마킹에는 미적용
+ * — 띄어쓰기 기준 단어 보존 줄바꿈 (리디북/스, 글 그/림 방지)
+ */
+[data-record-export-root][data-ui-style] tbody td:not([data-record-date-col]):not([data-record-link-col]),
+[data-record-export-root][data-ui-style] tbody td:not([data-record-date-col]) [data-inline-edit],
+[data-record-export-root][data-ui-style] tbody td:not([data-record-date-col]) [data-inline-edit] > button,
+[data-record-export-root][data-ui-style] tbody td:not([data-record-date-col]) [data-inline-edit] span,
+[data-record-export-root][data-ui-style] [data-record-title] {
+  word-break: keep-all !important;
+  overflow-wrap: break-word !important;
+  white-space: normal !important;
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
+[data-record-export-root][data-ui-style] [data-record-date-col],
+[data-record-export-root][data-ui-style] [data-record-date] {
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+}
+
+/* 태그형 속성 내보내기 전용 — 화면 태그 블록 디자인은 미변경 */
+[data-tag-export-root] ul,
+[data-tag-export-root] ol,
+[data-tag-export-root] li,
+[data-tag-export-root] [data-tag-record-item] {
+  list-style: none !important;
+  list-style-type: none !important;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+
+[data-tag-export-root] li::marker,
+[data-tag-export-root] li::before {
+  content: none !important;
+  display: none !important;
+}
+
+[data-tag-export-root] [data-tag-block-header],
+[data-tag-export-root] [data-tag-block-title] {
+  line-height: 1.4 !important;
+  padding-top: 4px !important;
+  overflow: visible !important;
+  max-height: none !important;
+  height: auto !important;
+}
