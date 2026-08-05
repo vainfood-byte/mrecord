@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+build/
+release/
+win-unpacked/
+backups/
+*.zip
+*.exe
+*.asar
