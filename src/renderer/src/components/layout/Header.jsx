@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { FolderOpen, Minus, Pin, PinOff, RotateCcw, Settings, Square, X } from 'lucide-react'
+import { FolderOpen, Minus, Pin, PinOff, RefreshCw, RotateCcw, Settings, Square, X } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import ExportCameraButton from './ExportCameraButton'
 import ExportProgressIndicator from './ExportProgressIndicator'
@@ -64,7 +64,7 @@ function TitleCreditMenu({ x, y }) {
   return overlayRoot ? createPortal(menu, overlayRoot) : menu
 }
 
-function MaricoRestartMenu({ x, y, onRestart, onClose }) {
+function MaricoRestartMenu({ x, y, onRestart, onRefresh, onClose }) {
   useEffect(() => {
     const ignore = (target) =>
       target?.closest?.('[data-marico-restart-menu]') ||
@@ -85,7 +85,7 @@ function MaricoRestartMenu({ x, y, onRestart, onClose }) {
   }, [onClose])
 
   const left = Math.min(x, window.innerWidth - 140)
-  const top = Math.min(y, window.innerHeight - 48)
+  const top = Math.min(y, window.innerHeight - 88)
 
   const menu = (
     <div
@@ -104,6 +104,17 @@ function MaricoRestartMenu({ x, y, onRestart, onClose }) {
       >
         <RotateCcw size={14} />
         재시작
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          onRefresh()
+          onClose()
+        }}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-black/5"
+      >
+        <RefreshCw size={14} />
+        새로고침
       </button>
     </div>
   )
@@ -237,6 +248,10 @@ export default function Header() {
     }
   }
 
+  const handleRefresh = () => {
+    window.location.reload()
+  }
+
   return (
     <>
       <header
@@ -265,7 +280,7 @@ export default function Header() {
                 )
               }}
               className="shrink-0 rounded-lg p-0.5 hover:opacity-85"
-              title="클릭: 재시작 · 우클릭: 크레딧"
+              title="클릭: 재시작/새로고침 · 우클릭: 크레딧"
             >
               <div
                 className="h-10 w-10 shrink-0"
@@ -406,6 +421,7 @@ export default function Header() {
           x={restartMenu.x}
           y={restartMenu.y}
           onRestart={handleRestart}
+          onRefresh={handleRefresh}
           onClose={() => setRestartMenu(null)}
         />
       )}

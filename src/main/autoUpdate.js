@@ -1,11 +1,13 @@
 /**
  * Electron 자동 업데이트 (electron-updater + GitHub Releases)
  * publish: github.com/vainfood-byte/mrecord
+ * UI 알림은 렌더러 커스텀 모달(IPC)로 전달 — 시스템 dialog 미사용
  */
-import { dialog, app } from 'electron'
+import { app, ipcMain } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
 let installingUpdate = false
+let quitAndInstallBound = false
 
 /** quitAndInstall 중 앱의 prepare-quit 가드가 설치를 막지 않도록 */
 export function isInstallingUpdate() {
@@ -30,40 +32,72 @@ function shouldSkipAutoUpdate() {
   return false
 }
 
-export function setupAutoUpdater() {
+function sendToRenderer(getWindow, channel, payload) {
+  try {
+    const win = typeof getWindow === 'function' ? getWindow() : getWindow
+    if (!win || win.isDestroyed?.()) return
+    win.webContents.send(channel, payload)
+  } catch (err) {
+    logError('send failed', channel, err?.message || err)
+  }
+}
+
+function bindQuitAndInstall() {
+  if (quitAndInstallBound) return
+  quitAndInstallBound = true
+  ipcMain.on('quit-and-install', () => {
+    log('quit-and-install requested by renderer')
+    installingUpdate = true
+    try {
+      autoUpdater.quitAndInstall()
+    } catch (err) {
+      installingUpdate = false
+      logError('quitAndInstall failed', err?.message || err)
+    }
+  })
+}
+
+/**
+ * @param {(() => import('electron').BrowserWindow | null) | import('electron').BrowserWindow} getWindow
+ */
+export function setupAutoUpdater(getWindow) {
+  bindQuitAndInstall()
+
   if (shouldSkipAutoUpdate()) {
     log('skipped (development / unpackaged)')
     return
   }
 
   try {
-    autoUpdater.on('update-available', (info) => {
-      log('새 버전 다운로드를 시작합니다', info?.version ?? '')
+    autoUpdater.on('checking-for-update', () => {
+      log('checking-for-update', app.getVersion())
     })
 
-    autoUpdater.on('update-downloaded', async (info) => {
-      log('update downloaded', info?.version ?? '')
-      try {
-        const { response } = await dialog.showMessageBox({
-          type: 'info',
-          buttons: ['재시작', '나중에'],
-          defaultId: 0,
-          cancelId: 1,
-          title: '업데이트 준비 완료',
-          message: '새 버전이 준비되었습니다. 재시작하여 적용하시겠습니까?'
-        })
-        if (response === 0) {
-          installingUpdate = true
-          autoUpdater.quitAndInstall()
-        }
-      } catch (err) {
-        logError('update-downloaded dialog failed', err)
-      }
+    autoUpdater.on('update-available', (info) => {
+      const version = info?.version ?? ''
+      log('update-available', version)
+      sendToRenderer(getWindow, 'update-available', {
+        version,
+        currentVersion: app.getVersion()
+      })
+    })
+
+    autoUpdater.on('update-not-available', (info) => {
+      log('update-not-available', info?.version ?? app.getVersion())
     })
 
     autoUpdater.on('error', (err) => {
       /* 메인 프로세스 크래시 방지 — 로깅만 */
       logError('error', err?.message || err)
+    })
+
+    autoUpdater.on('update-downloaded', (info) => {
+      const version = info?.version ?? ''
+      log('update-downloaded', version)
+      sendToRenderer(getWindow, 'update-downloaded', {
+        version,
+        currentVersion: app.getVersion()
+      })
     })
 
     autoUpdater.checkForUpdatesAndNotify().catch((err) => {

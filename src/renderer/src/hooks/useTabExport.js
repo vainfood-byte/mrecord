@@ -8,7 +8,7 @@ import { resolveFontFamily } from '../data/defaults'
 
 import { viewExportBasename } from '../utils/exportView'
 
-import { exportCalendarMonth, exportElementAsPng, exportCardGridSplitAsPng, exportRecordSplitAsPng, exportTagPropertySplitAsPng, preloadExportImages, restoreAllLockedExportCards } from '../utils/exportCalendar'
+import { exportCalendarMonth, exportCardGridSplitAsPng, exportRecordSplitAsPng, exportTagPropertySplitAsPng, preloadExportImages, restoreAllLockedExportCards } from '../utils/exportCalendar'
 
 import { getTabLabel, getPropertyFieldForTab, isCoreTab } from '../utils/tabHelpers'
 
@@ -125,7 +125,6 @@ export function useTabExport() {
         titleFontSizeRaw === 'small' || titleFontSizeRaw === 'large'
           ? titleFontSizeRaw
           : 'medium'
-      const splitExport = Boolean(settings.pagedView)
       const lockActive = Boolean(settings.lockSettings?.enabled)
       const titleLabel = isCoreTab(tab)
         ? TAB_TITLE_LABEL[tab] ?? ''
@@ -179,8 +178,7 @@ export function useTabExport() {
           if (!root) throw new Error('기록 화면을 찾을 수 없습니다')
           await exportRecordSplitAsPng(root, '기록', {
             ...exportOpts,
-            records: filteredRecords,
-            pagedViewExport: splitExport
+            records: filteredRecords
           })
           return
         }
@@ -188,10 +186,10 @@ export function useTabExport() {
         if (tab === 'gallery') {
           const root = findVisibleExportRoot('[data-gallery-export-root]')
           if (!root) throw new Error('갤러리 화면을 찾을 수 없습니다')
+          // 보기 모드와 무관 — 항상 10×10 타일 프레임
           await exportCardGridSplitAsPng(root, '갤러리', {
             ...exportOpts,
-            galleryTenByTen: true,
-            pagedViewExport: splitExport
+            galleryTenByTen: true
           })
           return
         }
@@ -218,27 +216,19 @@ export function useTabExport() {
         const field = getPropertyFieldForTab(tab, settings)
         if (field?.type === 'tags') {
           const filename = `${viewExportBasename(titleLabel)}.png`
-          if (splitExport) {
-            const root = findVisibleExportRoot('[data-tag-export-root]')
-            if (!root) throw new Error('태그형 속성 화면을 찾을 수 없습니다')
-            await exportTagPropertySplitAsPng(root, filename, exportOpts)
-          } else {
-            const root = await prepareRoot('[data-tag-export-root]', null)
-            await exportElementAsPng(root, filename, {
-              ...exportOpts,
-              tagFullScrollExport: true
-            })
-          }
+          const root = findVisibleExportRoot('[data-tag-export-root]')
+          if (!root) throw new Error('태그형 속성 화면을 찾을 수 없습니다')
+          await exportTagPropertySplitAsPng(root, filename, exportOpts)
           return
         }
 
         if (field && isMemoFieldType(field.type)) {
           const root = findVisibleExportRoot('[data-memo-export-root]')
           if (!root) throw new Error('메모형 카드 화면을 찾을 수 없습니다')
+          // 보기 모드와 무관 — 항상 10×10 타일 프레임
           await exportCardGridSplitAsPng(root, titleLabel, {
             ...exportOpts,
-            galleryTenByTen: true,
-            pagedViewExport: splitExport
+            galleryTenByTen: true
           })
           return
         }

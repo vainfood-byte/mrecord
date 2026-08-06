@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-react'
 import { getGalleryCoverAspectStyle } from '../../constants/galleryCardSizes'
 
-export function GalleryAddCard({ onClick, width = 140, hideTitle = false }) {
+export function GalleryAddCard({ onClick, width = 140, hideTitle = false, fillWidth = false }) {
   return (
     <button
       type="button"
@@ -9,8 +9,8 @@ export function GalleryAddCard({ onClick, width = 140, hideTitle = false }) {
       onMouseDown={(e) => e.stopPropagation()}
       data-add-record
       data-export-hide
-      className="flex flex-col overflow-hidden rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-bg-card)] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-      style={{ width }}
+      className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-bg-card)] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+      style={{ width: fillWidth ? '100%' : width }}
       title="새 기록 추가"
     >
       <div

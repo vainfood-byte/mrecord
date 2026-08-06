@@ -185,12 +185,18 @@ export default function TagPropertyView({ field }) {
 
   const recordsByTag = useMemo(() => {
     const map = new Map()
-    orderedTags.forEach((tag) => map.set(tag.id, []))
-    records.forEach((rec) => {
-      ;(rec.tagIds || []).forEach((tagId) => {
-        if (map.has(tagId)) map.get(tagId).push(rec)
-      })
-    })
+    for (let i = 0; i < orderedTags.length; i++) {
+      map.set(orderedTags[i].id, [])
+    }
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i]
+      const ids = rec.tagIds
+      if (!ids?.length) continue
+      for (let j = 0; j < ids.length; j++) {
+        const list = map.get(ids[j])
+        if (list) list.push(rec)
+      }
+    }
     return map
   }, [orderedTags, records])
 

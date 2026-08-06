@@ -123,6 +123,20 @@ export function weekStartKey(weekStart) {
   return format(weekStart, 'yyyy-MM-dd')
 }
 
+/** readDate → 기록[] 인덱스 (캘린더 셀 조회용, records 변경 시에만 재구축) */
+export function indexRecordsByReadDate(records) {
+  const map = Object.create(null)
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i]
+    const key = rec.readDate
+    if (!key) continue
+    const list = map[key]
+    if (list) list.push(rec)
+    else map[key] = [rec]
+  }
+  return map
+}
+
 /** 뷰포트에 표시할 주 수 (휠 스크롤 단위) */
 export const CALENDAR_VISIBLE_WEEKS = 4
 

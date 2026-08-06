@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +42,16 @@ IGNORE_SUFFIXES = {".zip"}
 IGNORE_PREFIXES = ("backup_",)
 
 
+def read_version() -> str:
+    pkg = ROOT / "package.json"
+    try:
+        data = json.loads(pkg.read_text(encoding="utf-8"))
+        ver = str(data.get("version") or "unknown").strip()
+        return ver.replace(" ", "_") if ver else "unknown"
+    except (OSError, json.JSONDecodeError, TypeError):
+        return "unknown"
+
+
 def should_ignore(rel: Path) -> bool:
     parts = rel.parts
     if any(part in IGNORE_NAMES for part in parts):
@@ -48,15 +59,13 @@ def should_ignore(rel: Path) -> bool:
     name = rel.name
     if name.startswith(IGNORE_PREFIXES) and rel.suffix.lower() in IGNORE_SUFFIXES:
         return True
-    if name == Path(__file__).name:
-        # Keep the backup script itself in the archive
-        return False
     return False
 
 
 def main() -> None:
+    version = read_version()
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    zip_name = f"backup_{stamp}.zip"
+    zip_name = f"backup_{version}_{stamp}.zip"
     zip_path = ROOT / zip_name
 
     file_count = 0
@@ -67,7 +76,6 @@ def main() -> None:
             rel = path.relative_to(ROOT)
             if should_ignore(rel):
                 continue
-            # Do not nest the zip we are writing
             if path.resolve() == zip_path.resolve():
                 continue
             zf.write(path, arcname=str(rel).replace("\\", "/"))

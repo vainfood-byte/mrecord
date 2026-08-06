@@ -414,6 +414,12 @@ html[data-ui-style='retro'] [data-record-export-root] * {
   border-radius: 0 !important;
 }
 
+/* 쁘띠/일반 스티커 선택 틀 — 레트로 * 그림자 제거 예외 */
+html[data-ui-style='retro'] [data-sticker-select-frame],
+html[data-ui-style='retro'] [data-calendar-root] [data-sticker-select-frame] {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #3b82f6 !important;
+}
+
 html[data-ui-style='retro'] [data-gallery-card-export]::before,
 html[data-ui-style='retro'] [data-gallery-card-export]::after,
 html[data-ui-style='retro'] [data-memo-card-export]::before,
@@ -655,24 +661,69 @@ html[data-ui-style='retro'] ::-webkit-scrollbar-thumb {
 }
 
 /*
- * 기본 모드 내보내기 캡처 전용 — 회색 제목/카드 박스 제거 + 표지 상단 12px 라운드
+ * 글래스 내보내기 캡처 전용 — inset 하이라이트/backdrop 제거
+ * (html2canvas가 inset box-shadow·color-mix를 작품명 옆 굵은 흰 틀로 그림)
+ * 메모 패널/그라데이션/텍스트박스는 건드리지 않음
+ */
+[data-gallery-export-root][data-ui-style='glass'] [data-gallery-card-export],
+[data-memo-export-root][data-ui-style='glass'] [data-memo-card-export],
+[data-tag-export-root][data-ui-style='glass'] [data-tag-block] {
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  border: 1px solid var(--border-color, var(--color-border)) !important;
+}
+
+[data-gallery-export-root][data-ui-style='glass'] [data-gallery-title-bar],
+[data-memo-export-root][data-ui-style='glass'] [data-memo-title-bar] {
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/*
+ * 메모 v2 텍스트박스 내보내기 — shadow-sm 등이 html2canvas에서 안쪽 테두리로 찍힘
+ * (패딩/여백/반투명 배경은 유지, 테두리·그림만 제거)
+ */
+[data-memo-export-root] [data-memo-panel] {
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+}
+
+/*
+ * 기본 모드 내보내기 캡처 전용 — 테마 카드색·테두리 유지
+ * 작품명 바는 화면과 동일하게 서브패널색 유지
  * (화면 UI·glass/retro 미적용: data-ui-style 주입 시에만)
+ * 표지→작품명(하단) 흰 잔상은 JS(applyDefaultModeExportCardChrome)에서
+ * 카드 표면을 서브패널색으로 덮어 처리
  */
 [data-gallery-export-root][data-ui-style='default'] [data-gallery-card-export],
 [data-memo-export-root][data-ui-style='default'] [data-memo-card-export] {
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  border: none !important;
+  background: var(--color-bg-card) !important;
+  background-color: var(--color-bg-card) !important;
+  border: 1px solid var(--color-border) !important;
   box-shadow: none !important;
 }
 
 [data-gallery-export-root][data-ui-style='default'] [data-gallery-title-bar],
 [data-memo-export-root][data-ui-style='default'] [data-memo-title-bar] {
-  background: #ffffff !important;
-  background-color: #ffffff !important;
+  background: var(--color-bg-sub-panel) !important;
+  background-color: var(--color-bg-sub-panel) !important;
   border: none !important;
   box-shadow: none !important;
   outline: none !important;
+}
+
+/*
+ * 내보내기 캡처 중 — glass 래퍼 overflow:visible 이 행 간격을 잠식하지 않도록
+ * (카드 내부 레이아웃/텍스트는 JS 높이 예산으로 맞춤)
+ */
+[data-gallery-export-root][data-export-title-size] [data-gallery-card],
+[data-memo-export-root][data-export-title-size] [data-memo-card] {
+  overflow: hidden !important;
 }
 
 /* 내보내기 캡처 중에만 — 타이틀 박스를 화면 카드(px-2 py-2, left)와 동기화 */

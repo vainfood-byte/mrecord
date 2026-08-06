@@ -124,12 +124,16 @@ function resolveExportTitleTextAlign(titleBar, text) {
   return 'left'
 }
 
+/** 작품명 크기(대)일 때 제목바 최소 높이 — forceExportTitleBarFlexible와 동일 기준 */
+function getMemoV1ExportTitleBarHeight(titleSize = 'medium') {
+  return resolveExportTitleSizeKey(titleSize) === 'large'
+    ? Math.ceil(GALLERY_TITLE_BAR_PX * 1.45)
+    : GALLERY_TITLE_BAR_PX
+}
+
 function forceExportTitleBarFlexible(titleBar, titleSize) {
   if (!titleBar) return
-  const minH =
-    resolveExportTitleSizeKey(titleSize) === 'large'
-      ? Math.ceil(GALLERY_TITLE_BAR_PX * 1.45)
-      : GALLERY_TITLE_BAR_PX
+  const minH = getMemoV1ExportTitleBarHeight(titleSize)
   titleBar.style.height = 'auto'
   titleBar.style.maxHeight = 'none'
   titleBar.style.minHeight = `${minH}px`
@@ -695,6 +699,10 @@ function applyMemoV2PanelExportBackground(panel, origPanel) {
   panel.style.background = 'none'
   panel.style.backgroundImage = 'none'
   panel.style.backgroundColor = safeBg
+  /* shadow-sm → html2canvas 안쪽 테두리 잔상 방지 (패딩/크기는 유지) */
+  panel.style.setProperty('box-shadow', 'none', 'important')
+  panel.style.setProperty('border', 'none', 'important')
+  panel.style.setProperty('outline', 'none', 'important')
   if (preset.color && !panel.style.color) {
     panel.style.color = toSafeCssColor(preset.color, 'color') || preset.color
   }
@@ -785,7 +793,9 @@ function bakeExportUiStyleChromeOnLiveCards(root, saved) {
         'borderColor',
         'backgroundColor',
         'overflow',
-        'boxSizing'
+        'boxSizing',
+        'backdropFilter',
+        'webkitBackdropFilter'
       ])
 
       card.style.boxSizing = 'border-box'
@@ -813,10 +823,19 @@ function bakeExportUiStyleChromeOnLiveCards(root, saved) {
           if (borderColor) card.style.borderColor = borderColor
         }
         card.style.borderRadius = radius
-        if (cs.boxShadow && cs.boxShadow !== 'none') {
+        /*
+         * glass inset box-shadow → html2canvas가 작품명 옆 굵은 흰 틀로 그림.
+         * 내보내기에서는 제거(화면 UI 글래스 하이라이트는 CSS 그대로).
+         */
+        if (uiStyle === 'glass') {
+          card.style.setProperty('box-shadow', 'none', 'important')
+          card.style.setProperty('-webkit-backdrop-filter', 'none', 'important')
+          card.style.setProperty('backdrop-filter', 'none', 'important')
+          if (borderColor) {
+            card.style.setProperty('border', `1px solid ${borderColor}`, 'important')
+          }
+        } else if (cs.boxShadow && cs.boxShadow !== 'none') {
           card.style.boxShadow = cs.boxShadow
-        } else if (uiStyle === 'glass') {
-          card.style.boxShadow = 'inset 0 1px 0 rgba(255, 255, 255, 0.28)'
         }
       }
 
@@ -926,10 +945,15 @@ function syncExportCardUiChrome(sourceCard, clonedCard) {
       if (borderColor) clonedCard.style.borderColor = borderColor
     }
     clonedCard.style.borderRadius = `${getExportCardRadiusPx()}px`
-    if (cs.boxShadow && cs.boxShadow !== 'none') {
+    if (uiStyle === 'glass') {
+      clonedCard.style.setProperty('box-shadow', 'none', 'important')
+      clonedCard.style.setProperty('-webkit-backdrop-filter', 'none', 'important')
+      clonedCard.style.setProperty('backdrop-filter', 'none', 'important')
+      if (borderColor) {
+        clonedCard.style.setProperty('border', `1px solid ${borderColor}`, 'important')
+      }
+    } else if (cs.boxShadow && cs.boxShadow !== 'none') {
       clonedCard.style.boxShadow = cs.boxShadow
-    } else if (uiStyle === 'glass') {
-      clonedCard.style.boxShadow = 'inset 0 1px 0 rgba(255, 255, 255, 0.28)'
     }
   }
 
@@ -1281,6 +1305,14 @@ function canTryElectronCapture(element, exportOptions = {}) {
     if (exportOptions.lockExport === true) return elementFitsViewport(element)
     return false
   }
+  /*
+   * 갤러리/메모 10×10 분할: Electron capturePage는 뷰포트 픽셀만 찍어
+   * applyTenByTen 타일 레이아웃이 깨지고 "현재 화면 캡처"처럼 나옴.
+   * 잠금·표지숨기기 블러는 html2canvas 전 bake로 처리.
+   */
+  if (exportOptions.splitPageCapture === true && isCardGridExportRoot(element)) {
+    return false
+  }
   if (exportOptions.splitPageCapture !== true) return true
   return exportOptions.lockExport === true
 }
@@ -1602,8 +1634,34 @@ function scrubLiveCardGridExportGeometry(root) {
       'filter',
       '-webkit-filter',
       'box-sizing',
-      'vertical-align'
+      'vertical-align',
+      'border-radius',
+      'border-top-left-radius',
+      'border-top-right-radius',
+      'border-bottom-left-radius',
+      'border-bottom-right-radius',
+      'overflow'
     ].forEach((p) => img.style.removeProperty(p))
+  })
+
+  /* 기본 모드 내보내기 크롬(흰색 제목/카드·강제 라운드) !important 잔존 제거 */
+  root.querySelectorAll('[data-gallery-card-export], [data-memo-card-export]').forEach((card) => {
+    ;[
+      'background',
+      'background-color',
+      'border',
+      'border-width',
+      'border-style',
+      'border-color',
+      'border-radius',
+      'border-top-left-radius',
+      'border-top-right-radius',
+      'border-bottom-left-radius',
+      'border-bottom-right-radius',
+      'box-shadow',
+      'outline',
+      'overflow'
+    ].forEach((p) => card.style.removeProperty(p))
   })
 
   root.querySelectorAll('[data-gallery-title-bar], [data-memo-title-bar]').forEach((bar) => {
@@ -1623,13 +1681,22 @@ function scrubLiveCardGridExportGeometry(root) {
       'border-top-left-radius',
       'border-top-right-radius',
       'border-bottom-left-radius',
-      'border-bottom-right-radius'
+      'border-bottom-right-radius',
+      'background',
+      'background-color',
+      'background-image',
+      'border',
+      'border-width',
+      'border-style',
+      'border-color',
+      'box-shadow',
+      'outline'
     ].forEach((p) => bar.style.removeProperty(p))
   })
 
   root
     .querySelectorAll(
-      '[data-gallery-title-bar] [data-inline-edit], [data-gallery-title], [data-memo-title-bar] [data-inline-edit], [data-memo-title]'
+      '[data-gallery-title-bar] [data-inline-edit], [data-gallery-title], [data-memo-title-bar] [data-inline-edit], [data-memo-title], [data-memo-title-bar] span, [data-memo-title-bar] p, [data-gallery-title-bar] span, [data-gallery-title-bar] p'
     )
     .forEach((text) => {
       ;[
@@ -1644,7 +1711,12 @@ function scrubLiveCardGridExportGeometry(root) {
         'overflow-wrap',
         '-webkit-line-clamp',
         'line-clamp',
-        '-webkit-box-orient'
+        '-webkit-box-orient',
+        'background',
+        'background-color',
+        'border',
+        'box-shadow',
+        'outline'
       ].forEach((p) => text.style.removeProperty(p))
     })
 }
@@ -1691,8 +1763,116 @@ function isMemoV1TitleFirstCard(card) {
   return isTitleFirstCard(card)
 }
 
-function getMemoV1ExportCardHeight(cardWidth) {
-  return GALLERY_TITLE_BAR_PX + getGalleryCoverExportHeight(cardWidth) + 2
+function getMemoV1ExportCardHeight(cardWidth, titleSize = 'medium') {
+  /* 제목바(+작품명 대 여유) + 표지 3:4 — 여분(+2) 없이 맞춰 표지 하단 들뜸/잔선 방지 */
+  return getMemoV1ExportTitleBarHeight(titleSize) + getGalleryCoverExportHeight(cardWidth)
+}
+
+/**
+ * 메모 v1 내보내기 전용 — 표지를 카드 콘텐츠 하단(테두리 안쪽)에 밀착.
+ * 제목 높이를 뺀 나머지 높이를 표지에 강제(레트로 비대칭 border 포함).
+ * 그라데이션/텍스트 노드는 수정하지 않는다.
+ */
+function sealMemoV1ExportCoverToBottom(root, saved = null) {
+  if (!root) return
+  root.querySelectorAll('[data-memo-card-export]').forEach((card) => {
+    if (!isMemoV1TitleFirstCard(card)) return
+    const cover = card.querySelector('[data-memo-cover]')
+    const titleBar = card.querySelector('[data-memo-title-bar]')
+    if (!cover) return
+
+    if (saved) {
+      pushMemoLayoutEntry(saved, card, [
+        'paddingBottom',
+        'overflow',
+        'display',
+        'flexDirection',
+        'boxSizing'
+      ])
+      if (titleBar) {
+        pushMemoLayoutEntry(saved, titleBar, [
+          'height',
+          'minHeight',
+          'maxHeight',
+          'flex',
+          'flexShrink',
+          'overflow'
+        ])
+      }
+      pushMemoLayoutEntry(saved, cover, [
+        'height',
+        'minHeight',
+        'maxHeight',
+        'flex',
+        'flexGrow',
+        'flexShrink',
+        'borderBottomLeftRadius',
+        'borderBottomRightRadius',
+        'marginBottom',
+        'paddingBottom',
+        'position',
+        'top',
+        'bottom',
+        'left',
+        'right',
+        'width'
+      ])
+      cover.querySelectorAll('img').forEach((img) => {
+        pushMemoLayoutEntry(saved, img, [
+          'borderBottomLeftRadius',
+          'borderBottomRightRadius'
+        ])
+      })
+    }
+
+    card.style.paddingBottom = '0'
+    card.style.boxSizing = 'border-box'
+    card.style.overflow = 'hidden'
+    card.style.display = 'flex'
+    card.style.flexDirection = 'column'
+
+    cover.style.setProperty('border-bottom-left-radius', '0px', 'important')
+    cover.style.setProperty('border-bottom-right-radius', '0px', 'important')
+    cover.style.marginBottom = '0'
+    cover.style.paddingBottom = '0'
+    cover.querySelectorAll('img').forEach((img) => {
+      img.style.setProperty('border-bottom-left-radius', '0px', 'important')
+      img.style.setProperty('border-bottom-right-radius', '0px', 'important')
+    })
+
+    const cs = getComputedStyle(card)
+    const borderTop = parseFloat(cs.borderTopWidth) || 0
+    const borderBottom = parseFloat(cs.borderBottomWidth) || 0
+    const cardRect = card.getBoundingClientRect()
+    const innerH = Math.max(1, Math.round(cardRect.height - borderTop - borderBottom))
+    const titleH = titleBar
+      ? Math.max(1, Math.ceil(titleBar.getBoundingClientRect().height))
+      : 0
+
+    if (titleBar) {
+      titleBar.style.setProperty('flex', `0 0 ${titleH}px`, 'important')
+      titleBar.style.setProperty('height', `${titleH}px`, 'important')
+      titleBar.style.setProperty('min-height', `${titleH}px`, 'important')
+      titleBar.style.setProperty('max-height', `${titleH}px`, 'important')
+      titleBar.style.overflow = 'hidden'
+      titleBar.style.flexShrink = '0'
+    }
+
+    /* 제목을 뺀 나머지를 표지가 전부 차지 — 레트로 5px 하단 border 안쪽까지 밀착 */
+    const targetCoverH = Math.max(1, innerH - titleH)
+    cover.style.position = 'relative'
+    cover.style.top = '0'
+    cover.style.bottom = 'auto'
+    cover.style.left = '0'
+    cover.style.right = 'auto'
+    cover.style.width = '100%'
+    cover.style.flex = 'none'
+    cover.style.flexGrow = '0'
+    cover.style.flexShrink = '0'
+    cover.style.setProperty('height', `${targetCoverH}px`, 'important')
+    cover.style.setProperty('min-height', `${targetCoverH}px`, 'important')
+    cover.style.setProperty('max-height', `${targetCoverH}px`, 'important')
+  })
 }
 
 function bakeImageToCoverRect(imgEl, width, height, dpr = 2) {
@@ -1733,6 +1913,8 @@ function prepareCoverImagesForLiveExport(root, cardWidth, saved) {
   root.querySelectorAll('[data-gallery-cover] img, [data-memo-cover] img').forEach((img) => {
     const cover = img.closest('[data-gallery-cover], [data-memo-cover]')
     if (!cover) return
+    const memoCard = cover.closest('[data-memo-card-export]')
+    const memoV1TitleFirst = isMemoV1TitleFirstCard(memoCard)
 
     pushCoverImageStyle(saved, img, [
       'position',
@@ -1767,7 +1949,10 @@ function prepareCoverImagesForLiveExport(root, cardWidth, saved) {
         maxHeight: cover.style.maxHeight,
         aspectRatio: cover.style.aspectRatio,
         overflow: cover.style.overflow,
-        position: cover.style.position
+        position: cover.style.position,
+        flex: cover.style.flex,
+        flexGrow: cover.style.flexGrow,
+        flexShrink: cover.style.flexShrink
       })
     }
 
@@ -1794,9 +1979,23 @@ function prepareCoverImagesForLiveExport(root, cardWidth, saved) {
     cover.style.position = 'relative'
     cover.style.overflow = 'hidden'
     cover.style.width = `${cardWidth}px`
-    cover.style.height = `${coverH}px`
-    cover.style.minHeight = `${coverH}px`
-    cover.style.maxHeight = `${coverH}px`
+    cover.style.marginBottom = '0'
+    /*
+     * 메모 v1(제목 상단): 표지가 카드 하단까지 flex로 채워
+     * 테두리/반올림 여유 때문에 생기던 하단 잔선을 막는다.
+     */
+    if (memoV1TitleFirst) {
+      cover.style.height = 'auto'
+      cover.style.minHeight = `${coverH}px`
+      cover.style.maxHeight = 'none'
+      cover.style.flex = '1 1 auto'
+      cover.style.flexGrow = '1'
+      cover.style.flexShrink = '0'
+    } else {
+      cover.style.height = `${coverH}px`
+      cover.style.minHeight = `${coverH}px`
+      cover.style.maxHeight = `${coverH}px`
+    }
   })
 }
 
@@ -1832,18 +2031,19 @@ async function prepareCardGridLiveExportCapture(root, layoutSaved, options = {})
     perImageTimeoutMs: options.preloadPerImageTimeoutMs ?? 8000,
     lockExport: options.lockExport === true
   })
-  if (options.lockExport === true) {
-    reinjectExportTitleSize()
-    await yieldToMain()
-    return
-  }
+  /* 잠금/표지숨기기: Electron 뷰포트 캡처 대신 블러 bake + 10×10 레이아웃 유지 */
   await prepareBlurredContentForLiveExport(root, options)
   stripLiveExportCoverVisualEffects(root)
   await bakeCoverImagesForLiveExport(root, layoutSaved.exportCardWidth, layoutSaved)
   // 캡처 직전 재주입 — bake/레이아웃 이후에도 titleFontSize가 DOM에 남도록
   reinjectExportTitleSize()
-  /* bake/타이틀 재주입 후에도 기본 모드 흰색·표지 라운드 유지 */
-  applyDefaultModeExportCardChromeOnRoot(root, layoutSaved)
+  /*
+   * 기본 모드 흰색·라운드 재적용만 — saved에 다시 push 금지.
+   * (push하면 이미 하얀 mid-export 값이 "원본"으로 쌓여 restore 후에도 인앱에 남음)
+   */
+  applyDefaultModeExportCardChromeOnRoot(root, null)
+  /* 크롬 재적용 이후 — 메모 v1 표지 하단 밀착(캡처 직전) */
+  sealMemoV1ExportCoverToBottom(root, null)
   await yieldToMain()
 }
 
@@ -1885,13 +2085,14 @@ async function bakeCoverImagesForLiveExport(root, cardWidth, saved) {
 
 function prepareMemoV1TitleBarsForLiveExport(root, saved, titleSize = 'medium') {
   const titleStyle = getExportTitleSizeStyle(titleSize)
+  const titleBarPx = getMemoV1ExportTitleBarHeight(titleSize)
   saved.titleStyles = saved.titleStyles || []
   root.querySelectorAll('[data-memo-card-export][data-maintain-layout]').forEach((inner) => {
     if (!isMemoV1TitleFirstCard(inner)) return
 
     const titleBar = inner.querySelector('[data-memo-title-bar]')
     const text = titleBar?.querySelector('[data-memo-title]')
-    const titleH = `${GALLERY_TITLE_BAR_PX}px`
+    const titleH = `${titleBarPx}px`
 
     if (titleBar) {
       saved.titleStyles.push({
@@ -1903,11 +2104,11 @@ function prepareMemoV1TitleBarsForLiveExport(root, saved, titleSize = 'medium') 
         flex: titleBar.style.flex,
         lineHeight: titleBar.style.lineHeight
       })
-      titleBar.style.height = titleH
-      titleBar.style.minHeight = titleH
-      titleBar.style.maxHeight = titleH
+      titleBar.style.setProperty('height', titleH, 'important')
+      titleBar.style.setProperty('min-height', titleH, 'important')
+      titleBar.style.setProperty('max-height', titleH, 'important')
       titleBar.style.overflow = 'hidden'
-      titleBar.style.flex = `0 0 ${titleH}`
+      titleBar.style.setProperty('flex', `0 0 ${titleH}`, 'important')
       titleBar.style.lineHeight = titleStyle.lineHeight
     }
 
@@ -1930,7 +2131,7 @@ function prepareMemoV1TitleBarsForLiveExport(root, saved, titleSize = 'medium') 
       text.style.webkitLineClamp = '2'
       text.style.lineClamp = '2'
       text.style.overflow = 'hidden'
-      text.style.maxHeight = `${GALLERY_TITLE_BAR_PX - 12}px`
+      text.style.maxHeight = `${Math.max(titleBarPx - 12, 1)}px`
       forceExportTitleTextStyle(text, titleSize)
     }
   })
@@ -1956,19 +2157,32 @@ function prepareMemoV1MaintainLayoutCoverForLiveExport(root, cardWidth, saved) {
       'maxHeight',
       'aspectRatio',
       'overflow',
+      'flex',
+      'flexGrow',
       'flexShrink',
       'position',
-      'display'
+      'display',
+      'marginBottom'
     ])
     cover.style.width = `${cardWidth}px`
     cover.style.aspectRatio = 'auto'
-    cover.style.height = `${coverH}px`
-    cover.style.minHeight = `${coverH}px`
-    cover.style.maxHeight = `${coverH}px`
     cover.style.overflow = 'hidden'
-    cover.style.flexShrink = '0'
     cover.style.position = 'relative'
     cover.style.display = 'block'
+    cover.style.marginBottom = '0'
+    if (isTitleFirstCard(inner)) {
+      cover.style.height = 'auto'
+      cover.style.minHeight = `${coverH}px`
+      cover.style.maxHeight = 'none'
+      cover.style.flex = '1 1 auto'
+      cover.style.flexGrow = '1'
+      cover.style.flexShrink = '0'
+    } else {
+      cover.style.height = `${coverH}px`
+      cover.style.minHeight = `${coverH}px`
+      cover.style.maxHeight = `${coverH}px`
+      cover.style.flexShrink = '0'
+    }
   })
 }
 
@@ -2127,6 +2341,17 @@ function fixGalleryTitleExport(sourceCard, clonedCard, blurBakes, doc) {
     return
   }
 
+  /* 잠금 라이브 bake된 작품명 — 클론에서 표지 src가 덮어쓰지 않도록 보존 */
+  if (isTitleBarBlurBaked(origTitleBar)) {
+    const bakedSrc =
+      origTitleBar.querySelector('img[data-export-title-blur-bake]')?.src ||
+      origTitleBar.querySelector('img')?.src
+    if (bakedSrc) {
+      applyBlurBakeToTitleBar(cloneTitleBar, { titleBar: bakedSrc }, doc, origTitleBar)
+    }
+    return
+  }
+
   if (hasBlurFilter(origTitleBar)) {
     cloneTitleBar.style.filter = getComputedStyle(origTitleBar).filter
     cloneTitleBar.style.transform = getComputedStyle(origTitleBar).transform
@@ -2227,7 +2452,9 @@ function isCoverFirstCard(card) {
 }
 
 /**
- * 기본 모드 내보내기 전용 — 회색 제목 박스 제거(흰색) + 표지 상단 12px 라운드.
+ * 기본 모드 내보내기 전용 — 카드 외곽 정리 + 표지 라운드.
+ * 작품명 바는 서브패널색 유지. 표지→작품명(하단) 카드는 카드 배경을 서브패널로 맞춰
+ * 하단 흰 잔상을 막고, 테마 테두리색을 유지한다.
  * glass/retro 및 화면 UI는 호출부에서 getLiveUiStyle()==='default'일 때만 진입.
  */
 function applyDefaultModeExportCardChrome(card, saved = null) {
@@ -2236,6 +2463,13 @@ function applyDefaultModeExportCardChrome(card, saved = null) {
   const radius = `${CARD_GRID_EXPORT_RADIUS_PX}px`
   const titleBar = card.querySelector('[data-gallery-title-bar], [data-memo-title-bar]')
   const cover = card.querySelector('[data-gallery-cover], [data-memo-cover]')
+  const theme = getThemeColors()
+  const titleBarBg = theme?.bgSubPanel || '#F5F1E5'
+  const cardBg = theme?.bgCard || '#ffffff'
+  const borderColor = theme?.border || '#D4CBB8'
+  const coverFirst = isCoverFirstCard(card)
+  /* 작품명 하단형: 카드 여백이 흰색으로 비치지 않도록 서브패널과 동일 표면 */
+  const surfaceBg = coverFirst && titleBar ? titleBarBg : cardBg
 
   if (saved) {
     pushCardChromeStyle(saved, card, [
@@ -2247,7 +2481,8 @@ function applyDefaultModeExportCardChrome(card, saved = null) {
       'borderColor',
       'borderRadius',
       'boxShadow',
-      'outline'
+      'outline',
+      'overflow'
     ])
     if (titleBar) {
       pushCardChromeStyle(saved, titleBar, [
@@ -2258,7 +2493,11 @@ function applyDefaultModeExportCardChrome(card, saved = null) {
         'borderStyle',
         'borderColor',
         'boxShadow',
-        'outline'
+        'outline',
+        'borderTopLeftRadius',
+        'borderTopRightRadius',
+        'borderBottomLeftRadius',
+        'borderBottomRightRadius'
       ])
     }
     if (cover) {
@@ -2283,19 +2522,32 @@ function applyDefaultModeExportCardChrome(card, saved = null) {
     }
   }
 
-  card.style.setProperty('background', '#ffffff', 'important')
-  card.style.setProperty('background-color', '#ffffff', 'important')
-  card.style.setProperty('border', 'none', 'important')
+  card.style.setProperty('background', surfaceBg, 'important')
+  card.style.setProperty('background-color', surfaceBg, 'important')
+  card.style.setProperty('border', `1px solid ${borderColor}`, 'important')
+  card.style.setProperty('border-color', borderColor, 'important')
   card.style.setProperty('box-shadow', 'none', 'important')
   card.style.setProperty('outline', 'none', 'important')
   card.style.setProperty('border-radius', radius, 'important')
+  card.style.setProperty('overflow', 'hidden', 'important')
 
   if (titleBar) {
-    titleBar.style.setProperty('background', '#ffffff', 'important')
-    titleBar.style.setProperty('background-color', '#ffffff', 'important')
+    titleBar.style.setProperty('background', titleBarBg, 'important')
+    titleBar.style.setProperty('background-color', titleBarBg, 'important')
     titleBar.style.setProperty('border', 'none', 'important')
     titleBar.style.setProperty('box-shadow', 'none', 'important')
     titleBar.style.setProperty('outline', 'none', 'important')
+    if (coverFirst) {
+      titleBar.style.setProperty('border-bottom-left-radius', radius, 'important')
+      titleBar.style.setProperty('border-bottom-right-radius', radius, 'important')
+      titleBar.style.setProperty('border-top-left-radius', '0px', 'important')
+      titleBar.style.setProperty('border-top-right-radius', '0px', 'important')
+    } else {
+      titleBar.style.setProperty('border-top-left-radius', radius, 'important')
+      titleBar.style.setProperty('border-top-right-radius', radius, 'important')
+      titleBar.style.setProperty('border-bottom-left-radius', '0px', 'important')
+      titleBar.style.setProperty('border-bottom-right-radius', '0px', 'important')
+    }
     titleBar
       .querySelectorAll('[data-inline-edit], [data-gallery-title], [data-memo-title], span, p')
       .forEach((el) => {
@@ -2309,7 +2561,7 @@ function applyDefaultModeExportCardChrome(card, saved = null) {
   if (!cover) return
 
   cover.style.setProperty('overflow', 'hidden', 'important')
-  if (isCoverFirstCard(card)) {
+  if (coverFirst) {
     if (titleBar) {
       cover.style.setProperty('border-top-left-radius', radius, 'important')
       cover.style.setProperty('border-top-right-radius', radius, 'important')
@@ -2330,14 +2582,16 @@ function applyDefaultModeExportCardChrome(card, saved = null) {
       })
     }
   } else if (titleBar) {
-    cover.style.setProperty('border-bottom-left-radius', radius, 'important')
-    cover.style.setProperty('border-bottom-right-radius', radius, 'important')
+    /* 메모 v1: 표지 하단 라운드 금지(카드 clip만) — 중첩 radius 출력 잔선 방지 */
+    const bottomR = isMemoV1TitleFirstCard(card) ? '0px' : radius
+    cover.style.setProperty('border-bottom-left-radius', bottomR, 'important')
+    cover.style.setProperty('border-bottom-right-radius', bottomR, 'important')
     cover.style.setProperty('border-top-left-radius', '0px', 'important')
     cover.style.setProperty('border-top-right-radius', '0px', 'important')
     cover.querySelectorAll('img').forEach((img) => {
       img.style.setProperty('overflow', 'hidden', 'important')
-      img.style.setProperty('border-bottom-left-radius', radius, 'important')
-      img.style.setProperty('border-bottom-right-radius', radius, 'important')
+      img.style.setProperty('border-bottom-left-radius', bottomR, 'important')
+      img.style.setProperty('border-bottom-right-radius', bottomR, 'important')
       img.style.setProperty('border-top-left-radius', '0px', 'important')
       img.style.setProperty('border-top-right-radius', '0px', 'important')
     })
@@ -2405,15 +2659,17 @@ function applyCardGridChromeForLiveExport(root, saved) {
       titleBar.style.borderTopLeftRadius = radius
       titleBar.style.borderTopRightRadius = radius
       cover.style.overflow = 'hidden'
-      cover.style.borderBottomLeftRadius = radius
-      cover.style.borderBottomRightRadius = radius
+      /* 메모 v1: 하단 라운드는 카드 overflow에만 맡김 */
+      const bottomR = isMemoV1TitleFirstCard(card) ? '0' : radius
+      cover.style.borderBottomLeftRadius = bottomR
+      cover.style.borderBottomRightRadius = bottomR
     } else if (cover) {
       pushCardChromeStyle(saved, cover, ['overflow', 'borderRadius'])
       cover.style.overflow = 'hidden'
       cover.style.borderRadius = radius
     }
 
-    /* 기본 모드: 흰색 표면 + 표지 상단 라운드를 !important로 최종 고정 */
+    /* 기본 모드: 테마 표면·테두리 + 표지 라운드를 !important로 최종 고정 */
     applyDefaultModeExportCardChrome(card, saved)
   })
 }
@@ -2455,7 +2711,7 @@ function fixGalleryCardExport(sourceCard, clonedCard, blurBakes, clonedDoc) {
   const doc = clonedDoc || clonedCard.ownerDocument
   applyBlurBakeToCover(clonedCard.querySelector('[data-gallery-cover]'), blurBakes, doc)
   fixGalleryTitleExport(sourceCard, clonedCard, blurBakes, doc)
-  /* 타이틀 sync 이후에도 기본 모드 흰색/라운드 유지 */
+  /* 타이틀 sync 이후에도 기본 모드 표면·테두리/라운드 유지 */
   applyDefaultModeExportCardChrome(clonedCard, null)
 }
 
@@ -2666,7 +2922,9 @@ async function prepareLockedCard(card, coverBlurCache) {
 
   const titleBar = card.querySelector('[data-gallery-title-bar], [data-memo-title-bar]')
   if (titleBar && hasBlurFilter(titleBar)) {
-    const baked = await bakeBlurredLayerSnapshot(titleBar)
+    // 표지 스냅샷이 작품명 영역에 섞이지 않도록 텍스트 전용 bake 우선
+    const baked =
+      (await bakeBlurredTitleBarSnapshot(titleBar)) || (await bakeBlurredLayerSnapshot(titleBar))
     saved.push({
       el: titleBar,
       filter: titleBar.style.filter,
@@ -2674,7 +2932,8 @@ async function prepareLockedCard(card, coverBlurCache) {
       transform: titleBar.style.transform,
       overflow: titleBar.style.overflow,
       color: titleBar.style.color,
-      innerHTML: titleBar.innerHTML
+      innerHTML: titleBar.innerHTML,
+      titleBlurBakeAttr: titleBar.getAttribute('data-export-title-blur-bake')
     })
     if (baked) {
       applyBlurBakeToTitleBar(titleBar, { titleBar: baked }, document, titleBar)
@@ -2716,7 +2975,7 @@ function restoreLockedCardsForExport(root) {
   const saved = lockedExportSaved.get(root)
   if (!saved?.length) return
   saved.forEach(
-    ({ el, src, filter, webkitFilter, transform, overflow, color, innerHTML }) => {
+    ({ el, src, filter, webkitFilter, transform, overflow, color, innerHTML, titleBlurBakeAttr }) => {
       if (!el) return
       if (src !== undefined) el.src = src
       if (filter !== undefined) el.style.filter = filter
@@ -2725,6 +2984,12 @@ function restoreLockedCardsForExport(root) {
       if (overflow !== undefined) el.style.overflow = overflow
       if (color !== undefined) el.style.color = color
       if (innerHTML !== undefined) el.innerHTML = innerHTML
+      if (titleBlurBakeAttr !== undefined) {
+        if (titleBlurBakeAttr == null) el.removeAttribute('data-export-title-blur-bake')
+        else el.setAttribute('data-export-title-blur-bake', titleBlurBakeAttr)
+      } else if (innerHTML !== undefined) {
+        el.removeAttribute('data-export-title-blur-bake')
+      }
     }
   )
   lockedExportSaved.delete(root)
@@ -2956,6 +3221,107 @@ async function bakeBlurredLayerSnapshot(sourceEl) {
   return canvas.toDataURL('image/png')
 }
 
+function wrapExportTitleLines(ctx, text, maxWidth, maxLines = 2) {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!raw) return []
+  const words = raw.split(' ')
+  const lines = []
+  let current = ''
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word
+    if (ctx.measureText(next).width <= maxWidth || !current) {
+      current = next
+      continue
+    }
+    lines.push(current)
+    current = word
+    if (lines.length >= maxLines) break
+  }
+  if (lines.length < maxLines && current) lines.push(current)
+  return lines.slice(0, maxLines)
+}
+
+/**
+ * 잠금 카드 작품명 전용 — 표지 픽셀이 섞이지 않도록
+ * 타이틀 바 배경 + 텍스트만 캔버스에 그려 블러 bake
+ */
+async function bakeBlurredTitleBarSnapshot(titleBar) {
+  if (!titleBar) return null
+  const cs = getComputedStyle(titleBar)
+  const blurPx = parseBlurPx(cs.filter) || 4
+  const rect = titleBar.getBoundingClientRect()
+  const w = Math.max(1, Math.round(rect.width))
+  const h = Math.max(1, Math.round(rect.height))
+  if (w < 2 || h < 2) return null
+
+  const textEl =
+    titleBar.querySelector('[data-gallery-title], [data-inline-edit], [data-memo-title], span, p') ||
+    null
+  const textCs = textEl ? getComputedStyle(textEl) : cs
+  const text = String(textEl?.innerText || textEl?.textContent || '').replace(/\s+/g, ' ').trim()
+
+  const dpr = 2
+  const canvas = document.createElement('canvas')
+  canvas.width = w * dpr
+  canvas.height = h * dpr
+  const ctx = canvas.getContext('2d')
+  ctx.scale(dpr, dpr)
+
+  const theme = getThemeColors()
+  const bg =
+    toSafeCssColor(cs.backgroundColor, 'backgroundColor') ||
+    theme?.bgSubPanel ||
+    '#F5F1E5'
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, w, h)
+
+  if (!text) {
+    await yieldToMain()
+    return canvas.toDataURL('image/png')
+  }
+
+  const padL = Number.parseFloat(cs.paddingLeft) || 8
+  const padR = Number.parseFloat(cs.paddingRight) || 8
+  const padT = Number.parseFloat(cs.paddingTop) || 8
+  const fontSize = textCs.fontSize || '12px'
+  const fontWeight = textCs.fontWeight || '500'
+  const fontFamily = textCs.fontFamily || 'sans-serif'
+  const color = toSafeCssColor(textCs.color, 'color') || theme?.text || '#745039'
+  const align = textCs.textAlign === 'center' || textCs.textAlign === 'right' ? textCs.textAlign : 'left'
+  const lineHeightRaw = Number.parseFloat(textCs.lineHeight)
+  const fontPx = Number.parseFloat(fontSize) || 12
+  const lineHeight = Number.isFinite(lineHeightRaw) ? lineHeightRaw : fontPx * 1.35
+  const maxWidth = Math.max(1, w - padL - padR)
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, 0, w, h)
+  ctx.clip()
+  if (blurPx > 0) ctx.filter = `blur(${blurPx}px)`
+  ctx.fillStyle = color
+  ctx.font = `${fontWeight} ${fontSize} ${fontFamily}`
+  ctx.textBaseline = 'top'
+  ctx.textAlign = align === 'center' ? 'center' : align === 'right' ? 'right' : 'left'
+  const x = align === 'center' ? w / 2 : align === 'right' ? w - padR : padL
+  const lines = wrapExportTitleLines(ctx, text, maxWidth, 2)
+  let y = padT
+  for (const line of lines) {
+    ctx.fillText(line, x, y, maxWidth)
+    y += lineHeight
+  }
+  ctx.restore()
+
+  await yieldToMain()
+  return canvas.toDataURL('image/png')
+}
+
+function isTitleBarBlurBaked(titleBar) {
+  return Boolean(
+    titleBar?.hasAttribute?.('data-export-title-blur-bake') ||
+      titleBar?.querySelector?.('img[data-export-title-blur-bake]')
+  )
+}
+
 async function buildMemoCardBlurBakes(sourceCard) {
   const bakes = { coverImg: null, coverPlaceholder: null, titleBar: null }
   const cover = sourceCard.querySelector('[data-memo-cover]')
@@ -3015,6 +3381,7 @@ function applyBlurBakeToTitleBar(clonedBar, bakes, doc, sourceBar) {
   const w = Math.max(1, Math.round(rect.width))
   const h = Math.max(1, Math.round(rect.height))
   clonedBar.innerHTML = ''
+  clonedBar.setAttribute('data-export-title-blur-bake', '1')
   clonedBar.style.filter = 'none'
   clonedBar.style.webkitFilter = 'none'
   clonedBar.style.transform = 'none'
@@ -3031,12 +3398,15 @@ function applyBlurBakeToTitleBar(clonedBar, bakes, doc, sourceBar) {
   const img = doc.createElement('img')
   img.src = bakes.titleBar
   img.alt = ''
+  img.setAttribute('data-export-title-blur-bake', '1')
+  img.setAttribute('draggable', 'false')
   img.style.display = 'block'
   img.style.position = 'absolute'
   img.style.inset = '0'
   img.style.width = `${w}px`
   img.style.height = `${h}px`
   img.style.objectFit = 'fill'
+  img.style.objectPosition = 'center'
   img.style.pointerEvents = 'none'
   clonedBar.appendChild(img)
 }
@@ -3054,6 +3424,16 @@ function fixMemoTitleBarExport(sourceCard, clonedCard, blurBakes, doc) {
 
     if (blurBakes?.titleBar) {
       applyBlurBakeToTitleBar(bar, blurBakes, doc, origBar)
+      return
+    }
+
+    if (isTitleBarBlurBaked(origBar)) {
+      const bakedSrc =
+        origBar.querySelector('img[data-export-title-blur-bake]')?.src ||
+        origBar.querySelector('img')?.src
+      if (bakedSrc) {
+        applyBlurBakeToTitleBar(bar, { titleBar: bakedSrc }, doc, origBar)
+      }
       return
     }
 
@@ -3310,21 +3690,31 @@ function fixMemoV1CardChromeExport(sourceCard, clonedCard) {
 
   const safeBorder =
     toSafeCssColor(getComputedStyle(sourceCard).borderTopColor, 'borderColor') || '#E8E2D6'
-  const subPanelBg =
-    toSafeCssColor(getComputedStyle(origTitleBar).backgroundColor, 'backgroundColor') ||
-    '#F5F1E5'
   const radiusPx = getExportCardRadiusPx()
   const uiStyle = getLiveUiStyle()
+  const themeSubPanel = getThemeColors()?.bgSubPanel || '#F5F1E5'
+  const computedTitleBg = toSafeCssColor(
+    getComputedStyle(origTitleBar).backgroundColor,
+    'backgroundColor'
+  )
+  /* 기본 모드: 테마 서브패널색 우선(라이브 bake로 흰값이 들어와도 덮어씀) */
+  const subPanelBg =
+    uiStyle === 'default' ? themeSubPanel : computedTitleBg || themeSubPanel
 
   clonedCard.style.outline = 'none'
   clonedCard.style.borderRadius = `${radiusPx}px`
   clonedCard.style.overflow = 'hidden'
+  clonedCard.style.display = 'flex'
+  clonedCard.style.flexDirection = 'column'
 
-  /* default: 회색 서브패널/테두리 대신 흰색·border none (glass/retro 경로 유지) */
+  /* default: 테마 카드색·테두리 유지 (작품명 바는 서브패널색) */
   if (uiStyle === 'default') {
-    clonedCard.style.setProperty('background', '#ffffff', 'important')
-    clonedCard.style.setProperty('background-color', '#ffffff', 'important')
-    clonedCard.style.setProperty('border', 'none', 'important')
+    const themeCardBg = getThemeColors()?.bgCard || '#ffffff'
+    const themeBorder = getThemeColors()?.border || safeBorder
+    clonedCard.style.setProperty('background', themeCardBg, 'important')
+    clonedCard.style.setProperty('background-color', themeCardBg, 'important')
+    clonedCard.style.setProperty('border', `1px solid ${themeBorder}`, 'important')
+    clonedCard.style.setProperty('border-color', themeBorder, 'important')
     clonedCard.style.boxShadow = 'none'
   } else {
     clonedCard.style.border = `${uiStyle === 'retro' ? 2 : 1}px solid ${safeBorder}`
@@ -3339,14 +3729,12 @@ function fixMemoV1CardChromeExport(sourceCard, clonedCard) {
     cloneTitleBar.style.outline = 'none'
     cloneTitleBar.style.boxShadow = 'none'
     cloneTitleBar.style.marginBottom = '0'
+    cloneTitleBar.style.flex = `0 0 ${GALLERY_TITLE_BAR_PX}px`
+    cloneTitleBar.style.flexShrink = '0'
     cloneTitleBar.style.borderTopLeftRadius = `${radiusPx}px`
     cloneTitleBar.style.borderTopRightRadius = `${radiusPx}px`
-    if (uiStyle === 'default') {
-      cloneTitleBar.style.setProperty('background', '#ffffff', 'important')
-      cloneTitleBar.style.setProperty('background-color', '#ffffff', 'important')
-    } else {
-      cloneTitleBar.style.backgroundColor = subPanelBg
-    }
+    cloneTitleBar.style.setProperty('background', subPanelBg, 'important')
+    cloneTitleBar.style.setProperty('background-color', subPanelBg, 'important')
   }
 
   const cloneCover = clonedCard.querySelector('[data-memo-cover]')
@@ -3355,10 +3743,16 @@ function fixMemoV1CardChromeExport(sourceCard, clonedCard) {
     cloneCover.style.outline = 'none'
     cloneCover.style.boxShadow = 'none'
     cloneCover.style.marginTop = '0'
+    cloneCover.style.marginBottom = '0'
     cloneCover.style.paddingTop = '0'
+    cloneCover.style.paddingBottom = '0'
     cloneCover.style.overflow = 'hidden'
-    cloneCover.style.borderBottomLeftRadius = `${radiusPx}px`
-    cloneCover.style.borderBottomRightRadius = `${radiusPx}px`
+    cloneCover.style.flex = '1 1 auto'
+    cloneCover.style.flexGrow = '1'
+    cloneCover.style.flexShrink = '0'
+    /* 하단 라운드는 카드 clip만 — 중첩 radius 출력 잔선 방지 */
+    cloneCover.style.borderBottomLeftRadius = '0'
+    cloneCover.style.borderBottomRightRadius = '0'
   }
 }
 
@@ -4478,13 +4872,25 @@ function expandScrollAncestors(element, saved) {
 }
 
 function freezeImagesFromSource(sourceEl, clonedDoc) {
+  /* 문서 전체 img 인덱스가 어긋나면 표지 src가 작품명 bake img에 섞임 → export root로 한정 */
+  const clonedRoot = findClonedExportRoot(clonedDoc, sourceEl) || clonedDoc.body
   const origImgs = [...sourceEl.querySelectorAll('img')]
-  const cloneImgs = [...clonedDoc.querySelectorAll('img')]
+  const cloneImgs = [...clonedRoot.querySelectorAll('img')]
 
   cloneImgs.forEach((cloneImg, i) => {
     const orig = origImgs[i]
     if (!orig) return
     try {
+      /* 잠금 작품명 블러 bake는 표지 natural size로 다시 그리지 말고 src만 유지 */
+      if (
+        orig.hasAttribute('data-export-title-blur-bake') ||
+        cloneImg.hasAttribute('data-export-title-blur-bake')
+      ) {
+        const src = orig.currentSrc || orig.src
+        if (src) cloneImg.src = src
+        cloneImg.setAttribute('data-export-title-blur-bake', '1')
+        return
+      }
       const coverUrl = orig.getAttribute('data-cover-url')
       if (coverUrl && !orig.src) orig.src = coverUrl
       const w = orig.naturalWidth || orig.width || 1
@@ -5165,7 +5571,7 @@ export const CARD_GRID_EXPORT_WIDTH = 2000
 export const SPLIT_EXPORT_COLS = 10
 export const SPLIT_EXPORT_ROWS = 3
 export const SPLIT_EXPORT_PAGE_SIZE = SPLIT_EXPORT_COLS * SPLIT_EXPORT_ROWS
-/** 갤러리·메모 내보내기 — 페이지보기 10×10, 무한스크롤 10×15 */
+/** 갤러리·메모 이미지 내보내기 — 보기 모드와 무관하게 10×10 타일 프레임 */
 export const GALLERY_EXPORT_ROWS_PAGED = 10
 export const GALLERY_EXPORT_ROWS_SCROLL = 10
 export const GALLERY_EXPORT_PAGE_SIZE_PAGED = SPLIT_EXPORT_COLS * GALLERY_EXPORT_ROWS_PAGED
@@ -5222,13 +5628,26 @@ function formatExportFilenameDate(date = new Date()) {
   return `${yy}${mm}${dd}`
 }
 
-/** 카드 그리드·기록 분할 내보내기: MyR + 탭제목 + YYMMDD + 무/페 + 페이지번호 */
-export function cardGridPageFilename(tabTitle, pageNum, { pagedView = false, date = new Date() } = {}) {
-  const safe = sanitizeExportTabTitle(tabTitle) || '내보내기'
+/**
+ * 카드 그리드 분할 내보내기 파일명
+ * 규칙: [탭 이름] - ([현재]/[전체]) - [yymmdd]
+ * 예: 갤러리 - (1/2) - 260807.png
+ * Windows 경로 안전을 위해 페이지 구분 `/` 는 전각 `／` 로 저장
+ */
+export function cardGridPageFilename(
+  tabTitle,
+  pageNum,
+  { totalPages = 1, date = new Date() } = {}
+) {
+  const safe =
+    String(tabTitle || '')
+      .replace(/[\\/:*?"<>|]/g, '')
+      .trim()
+      .replace(/\s+/g, ' ') || '내보내기'
   const stamp = formatExportFilenameDate(date)
-  const n = String(pageNum)
-  if (pagedView) return `MyR${safe}${stamp}페${n}.png`
-  return `MyR${safe}${stamp}무${n}.png`
+  const current = Math.max(1, Number(pageNum) || 1)
+  const total = Math.max(current, Number(totalPages) || 1)
+  return `${safe} - (${current}／${total}) - ${stamp}.png`
 }
 
 export const TAG_SPLIT_EXPORT_COLS = 7
@@ -5425,7 +5844,7 @@ async function fitRecordExportSliceEnd(
   return Math.min(start + 1, initialEnd)
 }
 
-function computeSplitExportCardHeight(sample, cardWidth) {
+function computeSplitExportCardHeight(sample, cardWidth, titleSize = 'medium') {
   if (!sample) return getGalleryCardExportHeight(cardWidth)
 
   const inner =
@@ -5433,7 +5852,7 @@ function computeSplitExportCardHeight(sample, cardWidth) {
     sample.querySelector('[data-memo-card-export]')
 
   if (isMemoV1TitleFirstCard(inner)) {
-    return getMemoV1ExportCardHeight(cardWidth)
+    return getMemoV1ExportCardHeight(cardWidth, titleSize)
   }
 
   const titleBar = (inner || sample).querySelector(
@@ -5460,7 +5879,7 @@ function computeSplitExportCardHeight(sample, cardWidth) {
   return coverH + titleH + 2 + shadowPad
 }
 
-function computeSplitExportCardMetrics(root) {
+function computeSplitExportCardMetrics(root, titleSize = 'medium') {
   const gap = parseGridGap(root)
   const natural = measureCardGridCellSize(root)
   const fitWidth = Math.floor(
@@ -5468,7 +5887,7 @@ function computeSplitExportCardMetrics(root) {
   )
   const cardWidth = Math.max(natural.cardWidth, fitWidth)
   const sample = getCardGridItems(root)[0]
-  const cardHeight = computeSplitExportCardHeight(sample, cardWidth)
+  const cardHeight = computeSplitExportCardHeight(sample, cardWidth, titleSize)
   return { cardWidth, cardHeight, gap }
 }
 
@@ -5488,7 +5907,10 @@ function prepareMemoV2PanelColorsForLiveExport(root, saved) {
       'background',
       'backgroundColor',
       'backgroundImage',
-      'color'
+      'color',
+      'boxShadow',
+      'border',
+      'outline'
     ])
     applyMemoV2PanelExportBackground(panel, panel)
   })
@@ -5685,8 +6107,8 @@ function prepareMemoMaintainLayoutForLiveExport(root, saved) {
 function prepareCardGridTitlesForLiveExport(root, saved, titleSize = 'medium') {
   saved.titleStyles = saved.titleStyles || []
   root.querySelectorAll('[data-gallery-card-export], [data-memo-card-export]').forEach((card) => {
-    // v1 maintain-layout 제목 고정은 prepareMemoV1TitleBarsForLiveExport가 담당 — 여기선 건드리지 않음
-    if (card.hasAttribute('data-maintain-layout') && isMemoV1TitleFirstCard(card)) return
+    // 메모 v1 제목 고정은 prepareMemoV1TitleBars / applyExportCardTitleTextOptions가 담당
+    if (isMemoV1TitleFirstCard(card)) return
 
     const titleBar = card.querySelector('[data-gallery-title-bar], [data-memo-title-bar]')
     if (!titleBar) return
@@ -5741,9 +6163,11 @@ function applyExportCardTitleTextOptions(root, saved, titleSize = 'medium') {
   root.querySelectorAll('[data-gallery-card-export], [data-memo-card-export]').forEach((card) => {
     const titleBar = card.querySelector('[data-gallery-title-bar], [data-memo-title-bar]')
     if (!titleBar) return
+    /* 잠금 블러 bake된 작품명은 텍스트 스타일 주입 대상에서 제외 */
+    if (isTitleBarBlurBaked(titleBar)) return
 
-    const maintainV1 =
-      card.hasAttribute('data-maintain-layout') && isMemoV1TitleFirstCard(card)
+    /* 메모 v1: 제목바 높이 고정 유지 — flexible로 풀리면 행 간격이 잠식됨 */
+    const memoV1TitleFirst = isMemoV1TitleFirstCard(card)
 
     const text = titleBar.querySelector(
       '[data-gallery-title], [data-inline-edit], [data-memo-title], span, p'
@@ -5761,7 +6185,7 @@ function applyExportCardTitleTextOptions(root, saved, titleSize = 'medium') {
     })
     const textAlign = resolveExportTitleTextAlign(titleBar, text)
     forceExportTitleTextStyle(text, sizeKey)
-    if (!maintainV1) {
+    if (!memoV1TitleFirst) {
       saved.titleStyles.push({
         el: titleBar,
         height: titleBar.style.height,
@@ -5780,6 +6204,20 @@ function applyExportCardTitleTextOptions(root, saved, titleSize = 'medium') {
       applyExportTitleBoxScreenSync(titleBar, text, { textAlign })
       forceExportTitleBarFlexible(titleBar, sizeKey)
     } else {
+      const titleH = `${getMemoV1ExportTitleBarHeight(sizeKey)}px`
+      saved.titleStyles.push({
+        el: titleBar,
+        height: titleBar.style.height,
+        minHeight: titleBar.style.minHeight,
+        maxHeight: titleBar.style.maxHeight,
+        overflow: titleBar.style.overflow,
+        flex: titleBar.style.flex
+      })
+      titleBar.style.setProperty('flex', `0 0 ${titleH}`, 'important')
+      titleBar.style.setProperty('height', titleH, 'important')
+      titleBar.style.setProperty('min-height', titleH, 'important')
+      titleBar.style.setProperty('max-height', titleH, 'important')
+      titleBar.style.overflow = 'hidden'
       forceExportTitleTextStyle(text, sizeKey)
       text.style.setProperty('word-break', 'keep-all', 'important')
       text.style.setProperty('overflow-wrap', 'break-word', 'important')
@@ -6014,14 +6452,15 @@ async function fitMemoExportSliceEnd(start, initialEnd, onExportSlice, resolveRo
   return Math.min(start + 1, initialEnd)
 }
 
-function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
+function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved, titleSize = 'medium') {
   const inner =
     card.querySelector('[data-gallery-card-export]') ||
     card.querySelector('[data-memo-card-export]')
   const maintainLayout = inner?.hasAttribute('data-maintain-layout')
   const memoV1TitleFirst = isMemoV1TitleFirstCard(inner)
-  const resolvedCardHeight =
-    maintainLayout && memoV1TitleFirst ? getMemoV1ExportCardHeight(cardWidth) : cardHeight
+  const resolvedCardHeight = memoV1TitleFirst
+    ? getMemoV1ExportCardHeight(cardWidth, titleSize)
+    : cardHeight
 
   saved.cardSizes.push({
     el: card,
@@ -6039,9 +6478,21 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
   card.style.width = `${cardWidth}px`
   card.style.minWidth = `${cardWidth}px`
   // 하단 그림자·2줄 제목이 셀 밖으로 잘리지 않게
-  card.style.overflow = maintainLayout ? 'hidden' : 'visible'
+  // 메모 v1 / glass(overflow:visible !important) — 행 간격 잠식 방지
+  if (maintainLayout || memoV1TitleFirst) {
+    card.style.setProperty('overflow', 'hidden', 'important')
+  } else {
+    card.style.overflow = 'visible'
+  }
   if (!maintainLayout) {
-    if (isRetro) {
+    if (memoV1TitleFirst) {
+      /* 그림자 여백을 카드 안에 넣지 않음 — 표지가 테두리에 밀착 (기본/글래스/레트로) */
+      card.style.boxSizing = 'border-box'
+      card.style.minHeight = `${resolvedCardHeight}px`
+      card.style.height = `${resolvedCardHeight}px`
+      card.style.paddingBottom = '0'
+      card.style.marginBottom = '0'
+    } else if (isRetro) {
       /* content-box + padding-bottom: 그림자 공간을 셀 내부에 포함 (margin 무시 대응) */
       applyExportRetroWrapperBottomPad(card, resolvedCardHeight - shadowPad, shadowPad)
     } else {
@@ -6053,6 +6504,7 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
   } else {
     card.style.minHeight = `${resolvedCardHeight}px`
     card.style.height = `${resolvedCardHeight}px`
+    if (memoV1TitleFirst) card.style.paddingBottom = '0'
   }
 
   if (inner) {
@@ -6071,16 +6523,21 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
     })
     inner.style.width = `${cardWidth}px`
     inner.style.minWidth = `${cardWidth}px`
-    inner.style.minHeight = `${Math.max(1, resolvedCardHeight - (maintainLayout ? 0 : shadowPad))}px`
+    inner.style.minHeight = `${Math.max(
+      1,
+      resolvedCardHeight - (maintainLayout || memoV1TitleFirst ? 0 : shadowPad)
+    )}px`
     inner.style.borderRadius = `${getExportCardRadiusPx()}px`
     if (isTitleFirstCard(inner)) {
       inner.style.display = 'flex'
       inner.style.flexDirection = 'column'
     }
-    if (maintainLayout) {
+    if (maintainLayout || memoV1TitleFirst) {
+      /* 메모 v1: 작품명 대 등으로 내부가 커져도 행 간격을 잠식하지 않도록 셀 높이에 고정 */
       inner.style.height = `${resolvedCardHeight}px`
       inner.style.maxHeight = `${resolvedCardHeight}px`
-      inner.style.overflow = 'hidden'
+      inner.style.setProperty('overflow', 'hidden', 'important')
+      inner.style.marginBottom = '0'
     } else {
       inner.style.height = 'auto'
       inner.style.maxHeight = 'none'
@@ -6091,7 +6548,7 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
 
     const titleBar = inner.querySelector('[data-gallery-title-bar], [data-memo-title-bar]')
     if (titleBar && memoV1TitleFirst) {
-      const titleH = `${GALLERY_TITLE_BAR_PX}px`
+      const titleH = `${getMemoV1ExportTitleBarHeight(titleSize)}px`
       saved.cardSizes.push({
         el: titleBar,
         height: titleBar.style.height,
@@ -6100,10 +6557,10 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
         overflow: titleBar.style.overflow,
         flex: titleBar.style.flex
       })
-      titleBar.style.flex = `0 0 ${titleH}`
-      titleBar.style.height = titleH
-      titleBar.style.minHeight = titleH
-      titleBar.style.maxHeight = titleH
+      titleBar.style.setProperty('flex', `0 0 ${titleH}`, 'important')
+      titleBar.style.setProperty('height', titleH, 'important')
+      titleBar.style.setProperty('min-height', titleH, 'important')
+      titleBar.style.setProperty('max-height', titleH, 'important')
       titleBar.style.overflow = 'hidden'
     } else if (titleBar && !maintainLayout) {
       // 갤러리/메모 일반 카드: 제목 2줄에 맞춰 유연 높이 (고정 height 금지)
@@ -6126,7 +6583,7 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
     if (cover) {
       const coverH = titleBar
         ? getGalleryCoverExportHeight(cardWidth)
-        : Math.max(1, resolvedCardHeight - (maintainLayout ? 2 : shadowPad + 2))
+        : Math.max(1, resolvedCardHeight - (maintainLayout ? 0 : shadowPad + 2))
       saved.cardSizes.push({
         el: cover,
         width: cover.style.width,
@@ -6137,6 +6594,7 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
         overflow: cover.style.overflow,
         position: cover.style.position,
         flex: cover.style.flex,
+        flexGrow: cover.style.flexGrow,
         flexShrink: cover.style.flexShrink,
         marginTop: cover.style.marginTop,
         marginBottom: cover.style.marginBottom,
@@ -6144,16 +6602,26 @@ function applyCardWrapperExportSize(card, cardWidth, cardHeight, saved) {
       })
       cover.style.width = `${cardWidth}px`
       cover.style.aspectRatio = 'auto'
-      cover.style.height = `${coverH}px`
-      cover.style.minHeight = `${coverH}px`
-      cover.style.maxHeight = `${coverH}px`
       cover.style.overflow = 'hidden'
       cover.style.position = 'relative'
       cover.style.top = '0'
       cover.style.marginTop = '0'
       cover.style.marginBottom = '0'
-      cover.style.flex = memoV1TitleFirst ? `0 0 ${coverH}px` : ''
-      cover.style.flexShrink = '0'
+      if (memoV1TitleFirst) {
+        /* 남은 높이를 표지가 채움 — 하단 빈 띠/잔선 제거 */
+        cover.style.height = 'auto'
+        cover.style.minHeight = `${coverH}px`
+        cover.style.maxHeight = 'none'
+        cover.style.flex = '1 1 auto'
+        cover.style.flexGrow = '1'
+        cover.style.flexShrink = '0'
+      } else {
+        cover.style.height = `${coverH}px`
+        cover.style.minHeight = `${coverH}px`
+        cover.style.maxHeight = `${coverH}px`
+        cover.style.flex = ''
+        cover.style.flexShrink = '0'
+      }
       cover.querySelectorAll('img').forEach((img) => {
         img.style.setProperty('display', 'block', 'important')
         img.style.margin = '0'
@@ -6172,13 +6640,10 @@ function resolveCardGridExportGridConfig(element, options = {}) {
       : resolveCardGridExportRoot(element, options)
 
   if (options.galleryTenByTen || root?.hasAttribute('data-gallery-export-root') || root?.hasAttribute('data-memo-export-root')) {
-    const pagedView = options.pagedViewExport === true
-    const rows = pagedView ? GALLERY_EXPORT_ROWS_PAGED : GALLERY_EXPORT_ROWS_SCROLL
-    const pageSize = pagedView ? GALLERY_EXPORT_PAGE_SIZE_PAGED : GALLERY_EXPORT_PAGE_SIZE_SCROLL
     return {
       cols: SPLIT_EXPORT_COLS,
-      rows,
-      pageSize,
+      rows: GALLERY_EXPORT_ROWS_PAGED,
+      pageSize: GALLERY_EXPORT_PAGE_SIZE_PAGED,
       fixedMemoGrid: root?.hasAttribute('data-memo-export-root')
     }
   }
@@ -6278,9 +6743,9 @@ function applyTenByTenExportLayout(
     prepareMemoMaintainLayoutForLiveExport(root, saved)
     prepareMemoV1MaintainLayoutCoverForLiveExport(root, cardWidth, saved)
     prepareMemoFixedGridClampForLiveExport(root, saved)
-    const { cardHeight } = computeSplitExportCardMetrics(root)
+    const { cardHeight } = computeSplitExportCardMetrics(root, titleSize)
     cards.forEach((card) => {
-      applyCardWrapperExportSize(card, cardWidth, cardHeight, saved)
+      applyCardWrapperExportSize(card, cardWidth, cardHeight, saved, titleSize)
       cardHeights.push(cardHeight)
     })
     rowHeights = Array(rows).fill(cardHeight)
@@ -6298,9 +6763,9 @@ function applyTenByTenExportLayout(
       applyMemoCardWrapperExportSize(card, cardWidth, rowH, saved)
     })
   } else {
-    const { cardHeight } = computeSplitExportCardMetrics(root)
+    const { cardHeight } = computeSplitExportCardMetrics(root, titleSize)
     cards.forEach((card) => {
-      applyCardWrapperExportSize(card, cardWidth, cardHeight, saved)
+      applyCardWrapperExportSize(card, cardWidth, cardHeight, saved, titleSize)
       cardHeights.push(cardHeight)
     })
     rowHeights = Array(rows).fill(cardHeight)
@@ -6351,6 +6816,8 @@ function applyTenByTenExportLayout(
 
   /* 표지 geometry/타이틀 주입 이후 — 기본 모드 흰색·상단 라운드 최종 고정 */
   applyDefaultModeExportCardChromeOnRoot(root, saved)
+  /* 메모 v1: 측정 후 표지를 카드 하단에 밀착 (위쪽 유격 없이 높이만 확장) */
+  sealMemoV1ExportCoverToBottom(root, saved)
 
   saved.exportCardWidth = cardWidth
   saved.exportTitleSize = titleSize
@@ -6713,32 +7180,35 @@ function resolveCardGridExportRoot(element, options) {
 
 export async function exportCardGridSplitAsPng(element, tabTitle, options = {}) {
   return withExportBackground(async () => {
-  const { onExportSlice, totalRecordCount, pagedViewExport = false } = options
+  const { onExportSlice, totalRecordCount } = options
   const gridConfig = resolveCardGridExportGridConfig(element, options)
   const exportPageSize = gridConfig.pageSize
   const useSlice = typeof onExportSlice === 'function'
   const total = useSlice ? (totalRecordCount ?? 0) : getCardGridItems(element).length
 
-  const buildPageFilename = (pageNum) =>
+  const buildPageFilename = (pageNum, totalPages = 1) =>
     typeof options.buildPageFilename === 'function'
-      ? options.buildPageFilename(tabTitle, pageNum)
-      : cardGridPageFilename(tabTitle, pageNum, { pagedView: pagedViewExport })
+      ? options.buildPageFilename(tabTitle, pageNum, totalPages)
+      : cardGridPageFilename(tabTitle, pageNum, { totalPages })
 
   if (!total && !useSlice) {
     let emptyLayoutSaved = null
     try {
       emptyLayoutSaved = applyTenByTenExportLayout(element, gridConfig, options)
       await prepareCardGridLiveExportCapture(element, emptyLayoutSaved, options)
-      await exportElementAsPng(element, buildPageFilename(1), {
+      await exportElementAsPng(element, buildPageFilename(1, 1), {
         ...options,
-        splitExportPages: pagedViewExport,
+        splitExportPages: true,
         splitPageCapture: true,
         exportPage: 1,
         exportTotalPages: 1,
         exportCardWidth: emptyLayoutSaved.exportCardWidth,
         exportTargetWidth: CARD_GRID_EXPORT_WIDTH,
         brandedMinWidth: CARD_GRID_EXPORT_WIDTH,
-        skipBrandedHeader: false
+        skipBrandedHeader: false,
+        skipBrandedHeaderText: false,
+        showDate: options.showDate !== false,
+        titleLabel: options.titleLabel ?? ''
       })
     } finally {
       restoreTenByTenExportLayout(element, emptyLayoutSaved)
@@ -6762,7 +7232,7 @@ export async function exportCardGridSplitAsPng(element, tabTitle, options = {}) 
   const savedCardDisplays = legacyCards?.map((card) => card.style.display) ?? []
   let root = resolveCardGridExportRoot(element, options)
 
-  const exportMemoOrGridPage = async (pageNum, start, end, totalPages, isFirstPage, isLastPage) => {
+  const exportMemoOrGridPage = async (pageNum, start, end, totalPages, _isFirstPage, isLastPage) => {
     if (useSlice) {
       await onExportSlice({ start, end: total ? end : 0 })
       await waitForExportTick(400)
@@ -6782,20 +7252,22 @@ export async function exportCardGridSplitAsPng(element, tabTitle, options = {}) 
       pageLayoutSaved = applyTenByTenExportLayout(root, gridConfig, options)
       await prepareCardGridLiveExportCapture(root, pageLayoutSaved, options)
 
-      const pageFilename = buildPageFilename(pageNum)
+      const pageFilename = buildPageFilename(pageNum, totalPages)
       const pageBase = totalPages > 0 ? ((pageNum - 1) / totalPages) * 100 : 0
       const pageOptions = {
         ...options,
-        splitExportPages: pagedViewExport && isFirstPage,
+        // 모든 페이지에 동일 브랜디드 프레임·타이틀·우측상단 정보 적용
+        splitExportPages: true,
         splitPageCapture: true,
         exportPage: pageNum,
         exportTotalPages: totalPages,
         exportCardWidth: pageLayoutSaved.exportCardWidth,
         exportTargetWidth: CARD_GRID_EXPORT_WIDTH,
         brandedMinWidth: CARD_GRID_EXPORT_WIDTH,
-        skipBrandedHeader: !isFirstPage,
-        showDate: isFirstPage ? options.showDate !== false : false,
-        titleLabel: isFirstPage ? (options.titleLabel ?? '') : '',
+        skipBrandedHeader: false,
+        skipBrandedHeaderText: false,
+        showDate: options.showDate !== false,
+        titleLabel: options.titleLabel ?? '',
         openFolder: isLastPage,
         onProgress: async (payload) => {
           const local = payload?.percent

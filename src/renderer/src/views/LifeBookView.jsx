@@ -1,10 +1,14 @@
 import TableView from './TableView'
 
+function isLifeBookRecord(rec) {
+  return rec.isLifeBook
+}
+
 /** 인생책 — isLifeBook 표시된 기록만 */
 export default function LifeBookView() {
   return (
     <TableView
-      filterFn={(rec) => rec.isLifeBook}
+      filterFn={isLifeBookRecord}
       columns={[
         { key: 'title', label: '제목' },
         { key: 'author', label: '저자' },

@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Virtualizer } from 'virtua'
 import { useApp } from '../context/AppContext'
@@ -21,6 +21,7 @@ import {
 } from '../constants/galleryCardSizes'
 import { SizeOptionMenuSection } from '../components/ui/SizeOptionMenuSection'
 import { offscreenCardHint } from '../utils/renderHints'
+import { resolveCoverChangePatch } from '../utils/coverImageHelpers'
 
 const overlayRoot = document.getElementById('overlay-root')
 
@@ -136,6 +137,7 @@ const GalleryCard = memo(function GalleryCard({
   locked,
   dispatch,
   cardWidth,
+  fillWidth = false,
   hideTitle,
   hideCover,
   onOpenMenu,
@@ -143,8 +145,16 @@ const GalleryCard = memo(function GalleryCard({
   eagerCover = false
 }) {
   const [cropSrc, setCropSrc] = useState(null)
+  const [coverSrcBroken, setCoverSrcBroken] = useState(false)
   const fileRef = useRef(null)
   const blurCover = locked || hideCover
+  /* 갤러리 카드: 썸네일 우선, 없거나 로드 실패 시 원본 coverUrl */
+  const listCoverSrc =
+    (!coverSrcBroken && rec.thumbnailUrl) || rec.coverUrl || ''
+
+  useEffect(() => {
+    setCoverSrcBroken(false)
+  }, [rec.id, rec.thumbnailUrl, rec.coverUrl])
 
   const update = (patch) => dispatch({ type: 'UPDATE_RECORD', payload: { ...rec, ...patch } })
 
@@ -153,7 +163,12 @@ const GalleryCard = memo(function GalleryCard({
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
-      if (typeof reader.result === 'string') update({ coverUrl: reader.result })
+      if (typeof reader.result !== 'string') return
+      void (async () => {
+        const patch = await resolveCoverChangePatch(reader.result, rec.id)
+        setCoverSrcBroken(false)
+        update(patch)
+      })()
     }
     reader.readAsDataURL(file)
     e.target.value = ''
@@ -178,7 +193,7 @@ const GalleryCard = memo(function GalleryCard({
         className={`group overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] text-left shadow-sm transition-all ${
           locked ? '' : 'hover:-translate-y-0.5 hover:shadow-md'
         }`}
-        style={{ width: cardWidth }}
+        style={{ width: fillWidth ? '100%' : cardWidth }}
         onContextMenu={openCardMenu}
       >
         <div
@@ -190,15 +205,20 @@ const GalleryCard = memo(function GalleryCard({
           }}
           onClick={() => !locked && dispatch({ type: 'SELECT_RECORD', payload: rec.id })}
         >
-          {rec.coverUrl ? (
+          {listCoverSrc ? (
             <LazyImage
-              src={rec.coverUrl}
+              src={listCoverSrc}
               alt={rec.title}
               cacheKey={rec.id}
               eager={eagerCover}
               className={`h-full w-full object-cover ${blurCover ? 'scale-110 blur-md' : ''}`}
               draggable={false}
               onContextMenu={openCardMenu}
+              onError={() => {
+                if (rec.thumbnailUrl && rec.coverUrl && !coverSrcBroken) {
+                  setCoverSrcBroken(true)
+                }
+              }}
             />
           ) : (
             <div
@@ -238,8 +258,12 @@ const GalleryCard = memo(function GalleryCard({
           aspect={3 / 4}
           freeResize
           onApply={(url) => {
-            update({ coverUrl: url })
-            setCropSrc(null)
+            void (async () => {
+              const patch = await resolveCoverChangePatch(url, rec.id)
+              setCoverSrcBroken(false)
+              update(patch)
+              setCropSrc(null)
+            })()
           }}
           onClose={() => setCropSrc(null)}
         />
@@ -260,9 +284,11 @@ function renderGalleryCardCell({
   dispatch,
   onOpenMenu,
   onRequestDelete,
-  eagerCover
+  eagerCover,
+  fillColumns = false
 }) {
   const totalSlots = records.length + 1
+  const cellWidth = fillColumns ? '100%' : cardWidth
 
   if (index >= totalSlots) return null
 
@@ -277,6 +303,7 @@ function renderGalleryCardCell({
           })
         }
         width={cardWidth}
+        fillWidth={fillColumns}
         hideTitle={hideTitle}
       />
     )
@@ -287,13 +314,19 @@ function renderGalleryCardCell({
     <div
       key={rec.id}
       data-gallery-card
-      style={{ width: cardWidth, minHeight: cardHeight, ...offscreenCardHint(cardWidth, cardHeight) }}
+      style={{
+        width: cellWidth,
+        minWidth: 0,
+        minHeight: cardHeight,
+        ...offscreenCardHint(cardWidth, cardHeight)
+      }}
     >
       <GalleryCard
         rec={rec}
         locked={isRecordLocked(rec, lock)}
         dispatch={dispatch}
         cardWidth={cardWidth}
+        fillWidth={fillColumns}
         hideTitle={hideTitle}
         hideCover={hideCover}
         onOpenMenu={onOpenMenu}
@@ -317,16 +350,21 @@ const GalleryGridRow = memo(function GalleryGridRow({
   dispatch,
   onOpenMenu,
   onRequestDelete,
-  eagerCover
+  eagerCover,
+  fillColumns = false
 }) {
   const start = rowIndex * columnCount
 
   return (
     <div
-      className="grid justify-start"
+      className="grid w-full justify-start"
       style={{
-        gridTemplateColumns: `repeat(${columnCount}, ${cardWidth}px)`,
+        width: '100%',
+        gridTemplateColumns: fillColumns
+          ? `repeat(${columnCount}, minmax(${cardWidth}px, 1fr))`
+          : `repeat(${columnCount}, ${cardWidth}px)`,
         columnGap: gap,
+        justifyContent: 'start',
         minHeight: cardHeight,
         marginBottom: gap
       }}
@@ -335,7 +373,13 @@ const GalleryGridRow = memo(function GalleryGridRow({
         const index = start + col
         const totalSlots = records.length + 1
         if (index >= totalSlots) {
-          return <div key={`empty-${rowIndex}-${col}`} aria-hidden style={{ width: cardWidth }} />
+          return (
+            <div
+              key={`empty-${rowIndex}-${col}`}
+              aria-hidden
+              style={{ width: fillColumns ? '100%' : cardWidth, minWidth: 0 }}
+            />
+          )
         }
         return renderGalleryCardCell({
           index,
@@ -349,7 +393,8 @@ const GalleryGridRow = memo(function GalleryGridRow({
           dispatch,
           onOpenMenu,
           onRequestDelete,
-          eagerCover
+          eagerCover,
+          fillColumns
         })
       })}
     </div>
@@ -367,26 +412,40 @@ function GalleryFlatGrid({
   onOpenMenu,
   onRequestDelete,
   onContextMenu,
-  eagerCover
+  eagerCover,
+  fillColumns = false
 }) {
   return (
     <div
       data-gallery-export-root
-      className="grid justify-start gap-4"
-      style={{ gridTemplateColumns: `repeat(auto-fill, ${cardWidth}px)` }}
+      className="grid w-full min-w-0 justify-start gap-4"
+      style={{
+        width: '100%',
+        maxWidth: 'none',
+        gridTemplateColumns: fillColumns
+          ? `repeat(auto-fill, minmax(${cardWidth}px, 1fr))`
+          : `repeat(auto-fill, ${cardWidth}px)`,
+        justifyContent: 'start'
+      }}
       onContextMenu={onContextMenu}
     >
       {records.map((rec) => (
         <div
           key={rec.id}
           data-gallery-card
-          style={{ width: cardWidth, minHeight: cardHeight, ...offscreenCardHint(cardWidth, cardHeight) }}
+          style={{
+            width: fillColumns ? '100%' : cardWidth,
+            minWidth: 0,
+            minHeight: cardHeight,
+            ...offscreenCardHint(cardWidth, cardHeight)
+          }}
         >
           <GalleryCard
             rec={rec}
             locked={isRecordLocked(rec, lock)}
             dispatch={dispatch}
             cardWidth={cardWidth}
+            fillWidth={fillColumns}
             hideTitle={hideTitle}
             hideCover={hideCover}
             onOpenMenu={onOpenMenu}
@@ -403,6 +462,7 @@ function GalleryFlatGrid({
           })
         }
         width={cardWidth}
+        fillWidth={fillColumns}
         hideTitle={hideTitle}
       />
     </div>
@@ -420,6 +480,8 @@ export default function GalleryView() {
   const hideTitle = state.settings.galleryHideTitle === true
   const hideCover = state.settings.galleryHideCover === true
   const cardWidth = getGalleryCardWidth(cardSize)
+  /* 사이드 패널 열림: 고정 px 열 대신 minmax(1fr)로 남은 폭을 채움 (닫힘 시 기존 유지) */
+  const fillColumns = state.detailMode === 'side'
   const columnCount = useGridColumnCount(containerRef, cardWidth, GALLERY_GRID_GAP)
   const [gridMenu, setGridMenu] = useState(null)
   const [cardMenu, setCardMenu] = useState(null)
@@ -511,7 +573,8 @@ export default function GalleryView() {
       dispatch,
       onOpenMenu: openCardMenu,
       onRequestDelete: requestDelete,
-      eagerCover: state.exportInProgress
+      eagerCover: state.exportInProgress,
+      fillColumns
     }),
     [
       columnCount,
@@ -524,15 +587,21 @@ export default function GalleryView() {
       dispatch,
       openCardMenu,
       requestDelete,
-      state.exportInProgress
+      state.exportInProgress,
+      fillColumns
     ]
   )
 
   return (
     <>
-      <div ref={containerRef}>
+      <div ref={containerRef} className="w-full min-w-0" style={{ width: '100%', maxWidth: 'none' }}>
         {useVirtual ? (
-          <div data-gallery-export-root onContextMenu={handleGridContextMenu}>
+          <div
+            data-gallery-export-root
+            className="w-full min-w-0"
+            style={{ width: '100%', maxWidth: 'none' }}
+            onContextMenu={handleGridContextMenu}
+          >
             <Virtualizer
               scrollRef={mainScrollRef}
               data={rowIndexes}
@@ -555,6 +624,7 @@ export default function GalleryView() {
             onRequestDelete={requestDelete}
             onContextMenu={handleGridContextMenu}
             eagerCover={state.exportInProgress}
+            fillColumns={fillColumns}
           />
         )}
       </div>

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { useApp, useTagsMap } from '../context/AppContext'
@@ -18,13 +19,16 @@ function formatDate(d) {
 /**
  * 공통 테이블 뷰 — 각 탭은 같은 데이터를 다른 컬럼으로 보여줌
  */
-export default function TableView({ columns, filterFn, filterCategory }) {
+export default function TableView({ columns, filterFn }) {
   const { dispatch } = useApp()
-  let records = useRecordListView().records
+  const allRecords = useRecordListView().records
   const tagsMap = useTagsMap()
   const { bind, portal, deleteDialog } = useRecordContextMenu()
 
-  if (filterFn) records = records.filter(filterFn)
+  const records = useMemo(
+    () => (filterFn ? allRecords.filter(filterFn) : allRecords),
+    [allRecords, filterFn]
+  )
 
   const renderCell = (rec, col) => {
     switch (col.type) {

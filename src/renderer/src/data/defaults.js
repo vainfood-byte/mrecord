@@ -307,6 +307,8 @@ export const DEFAULT_SETTINGS = {
   confirmBeforeDelete: true,
   /** 시리즈 회차 삭제 전 확인 (false = 다시는 묻지 않음) */
   confirmBeforeDeleteSeriesVolume: true,
+  /** 잠금 모드 이미지 내보내기 안내 (false = 다시 질문하지 않음) */
+  confirmLockExportWarning: true,
   /** 윈도우 시작 시 자동 실행 */
   autoStartOnLaunch: false,
   /** 바탕화면 바로가기 생성 */

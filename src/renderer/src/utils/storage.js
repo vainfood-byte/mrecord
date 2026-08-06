@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS, DEFAULT_TAGS } from '../data/defaults'
 import { SAMPLE_RECORDS } from '../data/sampleRecords'
 import { migrateSettings } from './tabHelpers'
+import { hydrateRecordsForPersist } from './recordHeavyStore'
 
 /** 구버전 localStorage 전체 저장 키 (마이그레이션용) */
 const LEGACY_STORAGE_KEY = 'mrecord-data-v1'
@@ -22,7 +23,26 @@ export function flushPendingSaves() {
 }
 
 function cloneJson(value) {
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value)
+    } catch {
+      /* fall through — Proxy/비직렬화 값 등 */
+    }
+  }
   return JSON.parse(JSON.stringify(value))
+}
+
+/** IPC/파일 로드 결과 — 문자열이면 1회만 parse, 이미 객체면 그대로 재사용 */
+export function coercePersistedData(data) {
+  if (data == null) return null
+  if (typeof data === 'object') return data
+  if (typeof data === 'string') {
+    const trimmed = data.trim()
+    if (!trimmed) return null
+    return JSON.parse(trimmed)
+  }
+  return null
 }
 
 function readMeta() {
@@ -192,10 +212,10 @@ export function buildDefaultAppState() {
   }
 }
 
-/** 백업 JSON과 동일 형식의 저장 스냅샷 */
+/** 백업 JSON과 동일 형식의 저장 스냅샷 (목록 state + heavy 스토어 병합) */
 export function buildPersistedData(state) {
   return stampPersistedData({
-    records: state.records,
+    records: hydrateRecordsForPersist(state.records),
     tags: state.tags,
     settings: state.settings,
     session: {
@@ -217,6 +237,16 @@ export function buildFreshPersistedData() {
   return buildPersistedData(buildDefaultAppState())
 }
 
+/** 주 저장 파일 부재 시 — 샘플/레거시 복구 없이 빈 records로 시작 */
+export function buildEmptyPersistedData() {
+  return stampPersistedData({
+    records: [],
+    tags: cloneJson(DEFAULT_TAGS),
+    settings: cloneDefaultSettings(),
+    session: {}
+  })
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -226,8 +256,9 @@ export async function loadPersistentDataFile() {
   try {
     if (typeof window !== 'undefined' && window.mrecord?.loadPersistentData) {
       const result = await window.mrecord.loadPersistentData()
-      if (result?.ok && result.data) {
-        const parsed = JSON.parse(result.data)
+      if (result?.ok && result.data != null) {
+        const parsed = coercePersistedData(result.data)
+        if (!parsed || typeof parsed !== 'object') return null
         if (result.savedAt && !parsed.savedAt) {
           parsed.savedAt = result.savedAt
         }
@@ -251,23 +282,21 @@ async function loadPersistentDataFileWithRetry(attempts = 4) {
 }
 
 /**
- * 시작 시 — 모든 저장소 후보 중 최신(작품 수 우선) 선택
+ * 시작 시 — userData 주 파일만 사용.
+ * Documents/localStorage/backups/.bak 자동 복구 없음 (없으면 null → 빈 records).
  * @returns {{ data: object, source: string } | null}
  */
 export async function loadBestPersistedData() {
-  const candidates = []
-
   const file = await loadPersistentDataFileWithRetry()
-  if (file) candidates.push({ data: file, source: file.__loadSource || 'file' })
+  if (!file) {
+    /* 구버전 localStorage 전체 JSON이 남아 있어도 자동 복구하지 않음 */
+    clearLegacyLocalStoragePayload()
+    return null
+  }
 
-  const legacyLocal = loadLegacyLocalStoragePayload()
-  if (legacyLocal) candidates.push({ data: legacyLocal, source: 'localStorage-legacy' })
-
-  const best = pickBestCandidate(candidates)
-  if (!best) return null
-
-  const { __loadSource, ...data } = best.data
-  return { data, source: best.source || __loadSource || 'unknown' }
+  /* 최상위 메타만 분리 — records/tags/settings 배열·객체는 참조 재사용 */
+  const { __loadSource, ...data } = file
+  return { data, source: file.__loadSource || __loadSource || 'primary' }
 }
 
 /** localStorage에는 메타·테마만 — 전체 JSON은 파일 전용 */
@@ -341,7 +370,52 @@ export function exportData(data) {
   URL.revokeObjectURL(url)
 }
 
-export function importData(file) {
+/**
+ * 백업 JSON 불러오기
+ * - Electron: 파일 경로로 import-data IPC (대용량 안전 파싱·Base64 추출·flush)
+ * - fallback: FileReader (소용량/비 Electron)
+ * @returns {Promise<object>}
+ */
+export async function importData(file) {
+  if (!file) throw new Error('no-file')
+
+  let filePath = ''
+  try {
+    if (typeof window !== 'undefined' && window.mrecord?.getPathForFile) {
+      filePath = window.mrecord.getPathForFile(file) || ''
+    }
+  } catch {
+    filePath = ''
+  }
+  if (!filePath) {
+    try {
+      filePath = typeof file.path === 'string' ? file.path : ''
+    } catch {
+      filePath = ''
+    }
+  }
+
+  if (filePath && typeof window !== 'undefined' && window.mrecord?.importData) {
+    const result = await window.mrecord.importData(filePath)
+    if (result?.ok && result.data != null) {
+      const parsed = coercePersistedData(result.data)
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('invalid-import-data')
+      }
+      /* 메인에서 추출한 media://cover 경로가 들어 있는 records 참조를 그대로 전달 */
+      if (!Array.isArray(parsed.records)) parsed.records = []
+      parsed.__importMeta = {
+        alreadyFlushed: result.alreadyFlushed === true,
+        coversMigrated: result.coversMigrated === true,
+        convertedCount: Number(result.convertedCount) || 0,
+        filePath: result.filePath || ''
+      }
+      return parsed
+    }
+    throw new Error(result?.error || 'import-failed')
+  }
+
+  /* fallback — 렌더러 FileReader (소용량) */
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {

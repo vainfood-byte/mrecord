@@ -12,6 +12,7 @@ import EditableTitle from '../ui/EditableTitle'
 import ResizeHandle from '../ui/ResizeHandle'
 import DeleteConfirmDialog from '../ui/DeleteConfirmDialog'
 import { restoreFocusAfterNativeDialog, resetInteractionLocks } from '../../utils/restoreFocusAfterDialog'
+import { resolveCoverChangePatch } from '../../utils/coverImageHelpers'
 
 const WIDE_THRESHOLD = 480
 const DEFAULT_LEFT_WIDTH = 288
@@ -228,8 +229,14 @@ export default function DetailPanel() {
   }
 
   const coverProps = {
-    onCoverChange: (url) => updateRecord({ coverUrl: url }),
-    onCoverDelete: () => updateRecord({ coverUrl: '' })
+    /* Base64/Data URL → save-cover-image IPC → media:// (실패 시 원본 유지) */
+    onCoverChange: (url) => {
+      void (async () => {
+        const patch = await resolveCoverChangePatch(url, record.id)
+        updateRecord(patch)
+      })()
+    },
+    onCoverDelete: () => updateRecord({ coverUrl: '', thumbnailUrl: '' })
   }
 
   const reviewEditorProps = {

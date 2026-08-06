@@ -1,8 +1,21 @@
 import { formatDateByMode } from './dateFieldFormat'
-import { contrastText } from './colorUtils'
+import { contrastText, hexToRgba } from './colorUtils'
 import { composeBrandedExportCanvas } from './exportBrandedFrame'
 import { downloadDataUrl, reviewExportBasename } from './downloadFile'
 import { getRecordRatingIcon } from './ratingHelpers'
+
+/** 글래스 모드 패널 — 화면 패널(rgba panel-bg 0.65)과 동일 알파, html2canvas용 확정 rgba */
+function resolveExportPanelBackground(uiStyle, fallbackHex) {
+  if (uiStyle !== 'glass') {
+    return `var(--color-bg-panel, ${fallbackHex})`
+  }
+  const rgb =
+    typeof document !== 'undefined'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--panel-bg-rgb').trim()
+      : ''
+  if (rgb) return `rgba(${rgb}, 0.65)`
+  return hexToRgba(fallbackHex, 0.65)
+}
 
 export async function exportFullRecord({
   record,
@@ -65,8 +78,13 @@ function buildExportDOM(record, fields, tagsMap, reviewSections, colors) {
   const el = document.createElement('div')
   const themeStyle = getExportUiStyleAttr()
   el.setAttribute('data-ui-style', themeStyle || 'default')
-  /* 오프스크린 배치만 인라인 — 높이/라운드는 CSS·data-ui-style에 위임 */
-  el.style.cssText = `position:fixed;left:-9999px;top:0;width:600px;padding:24px;background:var(--color-bg-panel, ${colors.bg});color:var(--color-text, ${colors.text});font-family:inherit;`
+  el.setAttribute('data-review-export-root', '')
+  const panelBg = resolveExportPanelBackground(
+    themeStyle,
+    colors.bgPanel || colors.bg || '#F5F1E5'
+  )
+  /* 오프스크린 배치만 인라인 — 글래스는 패널만 반투명(배경 이미지 비침) */
+  el.style.cssText = `position:fixed;left:-9999px;top:0;width:600px;padding:24px;background:${panelBg};color:var(--color-text, ${colors.text});font-family:inherit;`
 
   const top = document.createElement('div')
   top.style.cssText = 'display:flex;gap:16px;margin-bottom:16px;align-items:stretch;'
@@ -267,8 +285,10 @@ async function exportAsPng(
 ) {
   const { default: html2canvas } = await import('html2canvas')
   await waitForImages(element)
+  const isGlass = element.getAttribute('data-ui-style') === 'glass'
   const canvas = await html2canvas(element, {
-    backgroundColor: bgColor || '#FFF9E5',
+    /* 글래스: 패널 알파 유지 → 브랜드 프레임 배경이 비치도록 */
+    backgroundColor: isGlass ? null : bgColor || '#FFF9E5',
     scale: 2,
     useCORS: true,
     height: element.scrollHeight,

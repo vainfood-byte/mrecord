@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import Header from './components/layout/Header'
 import TabBar from './components/layout/TabBar'
+import UpdateModal from './components/layout/UpdateModal'
 import { useApp, isCoreTab } from './context/AppContext'
-import { MainScrollProvider, MainScrollContainer } from './context/MainScrollContext'
+import { MainScrollProvider, MainScrollContainer, TabScrollPreserver } from './context/MainScrollContext'
 import RecordPageNav from './components/layout/RecordPageNav'
 
 /** 초기 번들 축소 — 탭/패널은 사용 시점에 비동기 로드 */
@@ -137,6 +138,7 @@ const SIDE_DISMISS_IGNORE = [
   '[data-cover-picker]',
   '[data-cover-crop]',
   '[data-review-img-ui]',
+  '[data-review-image-viewer]',
   '[data-trace-dialog]',
   '[data-trace-widget]',
   '[data-trace-toggle]',
@@ -163,8 +165,9 @@ function shouldDismissSidePanel(target) {
 export default function App() {
   const { state, dispatch } = useApp()
   const windowRestoredRef = useRef(false)
+  const [optimizeToast, setOptimizeToast] = useState(false)
+  const optimizeToastShownRef = useRef(false)
 
-  const isGallery = state.activeTab === 'gallery'
   const isCalendar = state.activeTab === 'calendar'
   const sideOpen = state.detailMode === 'side'
   const isFullDetail = state.detailMode === 'full'
@@ -172,6 +175,27 @@ export default function App() {
   const showDetailPanel = sideOpen || isFullDetail
   const showSettings = Boolean(state.settingsOpen)
   const showPropertyRemote = Boolean(state.propertyRemoteOpen)
+
+  /** 부팅 Auto-Migration 완료 — "데이터 최적화가 완료되었습니다." 2초 알림 */
+  useEffect(() => {
+    let hideTimer = null
+    const showToast = () => {
+      if (optimizeToastShownRef.current) return
+      optimizeToastShownRef.current = true
+      setOptimizeToast(true)
+      hideTimer = window.setTimeout(() => setOptimizeToast(false), 2000)
+    }
+
+    const unsub = window.mrecord?.onDataOptimizationComplete?.(showToast)
+    void window.mrecord?.getDataOptimizationResult?.().then((result) => {
+      if (result?.migrated) showToast()
+    })
+
+    return () => {
+      unsub?.()
+      if (hideTimer != null) window.clearTimeout(hideTimer)
+    }
+  }, [])
 
   useEffect(() => {
     if (windowRestoredRef.current) return
@@ -238,15 +262,7 @@ export default function App() {
   }, [])
 
   const handleMainMouseDown = (e) => {
-    if (
-      state.settingsOpen &&
-      !e.target.closest('[data-settings-panel]') &&
-      !e.target.closest('[data-settings-trigger]') &&
-      !e.target.closest('[data-color-picker-popover]') &&
-      !e.target.closest('[data-color-picker-native]')
-    ) {
-      dispatch({ type: 'TOGGLE_SETTINGS' })
-    }
+    /* 설정 닫기는 SettingsPanel useOutsideDismiss가 담당 — 여기서 TOGGLE하면 이중 호출로 다시 열림 */
     if (
       (state.traceAddOpen || state.traceEditId) &&
       !e.target.closest('[data-trace-dialog]') &&
@@ -273,19 +289,28 @@ export default function App() {
             <div className="relative flex flex-1 overflow-hidden" data-main-content>
               <div className="relative flex min-w-0 flex-1 overflow-hidden">
                 <main
-                  className={`flex h-full flex-col ${
-                    isGallery && sideOpen ? 'py-5 pl-5 pr-2' : 'w-full p-5'
+                  className={`flex h-full min-w-0 flex-col justify-start ${
+                    sideOpen ? 'box-border min-w-0 py-5 pl-5' : 'w-full p-5'
                   } ${state.settings.pagedView && state.activeTab !== 'calendar' ? 'pb-0' : ''}`}
                   onMouseDown={handleMainMouseDown}
                   style={
-                    isGallery && sideOpen
-                      ? { width: `calc(100% - ${panelWidth}px)`, flexShrink: 0 }
+                    sideOpen
+                      ? {
+                          /* overlay 사이드 패널 — 남은 좌측 폭만 사용 (margin 이중 예약 없음) */
+                          width: `calc(100% - ${panelWidth}px)`,
+                          maxWidth: `calc(100% - ${panelWidth}px)`,
+                          flex: '0 0 auto',
+                          paddingRight: 8,
+                          boxSizing: 'border-box',
+                          minWidth: 0
+                        }
                       : undefined
                   }
                 >
                   <MainScrollContainer
                     className={`min-h-0 flex-1 ${isCalendar ? 'overflow-hidden' : 'overflow-y-auto'}`}
                   >
+                    <TabScrollPreserver activeTab={state.activeTab} />
                     <MainView />
                   </MainScrollContainer>
                   <RecordPageNav />
@@ -321,6 +346,16 @@ export default function App() {
           <Suspense fallback={null}>
             <PropertyRemotePanel />
           </Suspense>
+        )}
+        <UpdateModal />
+        {optimizeToast && (
+          <div
+            className="pointer-events-none fixed bottom-6 left-1/2 z-[100010] -translate-x-1/2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-panel)] px-4 py-2.5 text-sm text-[var(--color-text)] shadow-lg"
+            role="status"
+            aria-live="polite"
+          >
+            데이터 최적화가 완료되었습니다.
+          </div>
         )}
       </div>
     </MainScrollProvider>

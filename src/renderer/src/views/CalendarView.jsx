@@ -24,6 +24,7 @@ import PetitStickerLibrary from '../components/calendar/PetitStickerLibrary'
 import {
   buildLibraryFromStickers,
   generateMonthGridWeeks,
+  indexRecordsByReadDate,
   recordsPerCell,
   weekStartKey,
   weeksInMonthGrid
@@ -31,10 +32,15 @@ import {
 import { exportCalendarMonth, exportCalendarYearGrid } from '../utils/exportCalendar'
 import { waitForExportTick } from '../utils/exportBackground'
 import {
+  LOCK_EXPORT_WARNING_MESSAGE,
+  shouldConfirmLockExport
+} from '../utils/exportTabHelpers'
+import {
   createPetitSticker,
   loadImageSize,
   readPngFile
 } from '../utils/stickerHelpers'
+import DeleteConfirmDialog from '../components/ui/DeleteConfirmDialog'
 
 export default function CalendarView() {
   const { state, dispatch } = useApp()
@@ -65,6 +71,8 @@ export default function CalendarView() {
   const [recordPopup, setRecordPopup] = useState(null)
   const [jumpPicker, setJumpPicker] = useState(null)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [lockWarnOpen, setLockWarnOpen] = useState(false)
+  const pendingLockExportRef = useRef(null)
 
   const boxRef = useRef(null)
   const viewportRef = useRef(null)
@@ -96,16 +104,10 @@ export default function CalendarView() {
   const maxRecords = recordsPerCell(cellHeight)
   const monthWeekCount = weeksInMonthGrid(displayMonth)
 
-  const recordsByDate = useMemo(() => {
-    const map = {}
-    state.records.forEach((rec) => {
-      const key = rec.readDate
-      if (!key) return
-      if (!map[key]) map[key] = []
-      map[key].push(rec)
-    })
-    return map
-  }, [state.records])
+  const recordsByDate = useMemo(
+    () => indexRecordsByReadDate(state.records),
+    [state.records]
+  )
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -224,6 +226,35 @@ export default function CalendarView() {
       }
     },
     [displayMonth, goToMonth, brandedExportOptions]
+  )
+
+  const requestCalendarExport = useCallback(
+    (job) => {
+      if (shouldConfirmLockExport(state.settings)) {
+        pendingLockExportRef.current = job
+        setExportMenuOpen(false)
+        setLockWarnOpen(true)
+        return
+      }
+      if (job.type === 'year') handleExportYear(job.year)
+      else handleExportMonth()
+    },
+    [state.settings, handleExportMonth, handleExportYear]
+  )
+
+  const confirmLockExport = useCallback(
+    async (skipAsk) => {
+      if (skipAsk) {
+        dispatch({ type: 'UPDATE_SETTINGS', payload: { confirmLockExportWarning: false } })
+      }
+      const job = pendingLockExportRef.current
+      pendingLockExportRef.current = null
+      setLockWarnOpen(false)
+      if (!job) return
+      if (job.type === 'year') await handleExportYear(job.year)
+      else await handleExportMonth()
+    },
+    [dispatch, handleExportMonth, handleExportYear]
   )
 
   const placeSticker = useCallback(
@@ -618,9 +649,24 @@ export default function CalendarView() {
         <CalendarExportMenu
           anchorRef={exportBtnRef}
           displayYear={year}
-          onExportMonth={handleExportMonth}
-          onExportYear={handleExportYear}
+          onExportMonth={() => requestCalendarExport({ type: 'month' })}
+          onExportYear={(y) => requestCalendarExport({ type: 'year', year: y })}
           onClose={() => setExportMenuOpen(false)}
+        />
+      )}
+
+      {lockWarnOpen && (
+        <DeleteConfirmDialog
+          title="안내"
+          message={LOCK_EXPORT_WARNING_MESSAGE}
+          skipAskLabel="다시 질문하지 않기"
+          confirmLabel="진행"
+          confirmClassName="flex-1 rounded-lg bg-[var(--color-accent)] py-2 text-sm text-white hover:opacity-90"
+          onConfirm={confirmLockExport}
+          onCancel={() => {
+            pendingLockExportRef.current = null
+            setLockWarnOpen(false)
+          }}
         />
       )}
     </div>

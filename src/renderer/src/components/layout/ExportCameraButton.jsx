@@ -4,7 +4,12 @@ import { Camera } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useTabExport } from '../../hooks/useTabExport'
 import { useOutsideDismiss } from '../../hooks/useOutsideDismiss'
-import { isTabImageExportable } from '../../utils/exportTabHelpers'
+import {
+  isTabImageExportable,
+  LOCK_EXPORT_WARNING_MESSAGE,
+  shouldConfirmLockExport
+} from '../../utils/exportTabHelpers'
+import DeleteConfirmDialog from '../ui/DeleteConfirmDialog'
 
 const overlayRoot = document.getElementById('overlay-root')
 
@@ -84,6 +89,7 @@ export default function ExportCameraButton() {
   const { state, dispatch } = useApp()
   const { exportActiveTabImage, exportInProgress } = useTabExport()
   const [menu, setMenu] = useState(null)
+  const [lockWarnOpen, setLockWarnOpen] = useState(false)
   const runningRef = useRef(false)
 
   const options = state.settings.exportImageOptions || {
@@ -102,17 +108,10 @@ export default function ExportCameraButton() {
     })
   }
 
-  const runExport = async () => {
+  const doExport = async () => {
     if (runningRef.current || exportInProgress) return
-
-    if (!isTabImageExportable(state.activeTab, state.settings)) {
-      alert('이 탭에서는 이미지 내보내기를 사용할 수 없습니다.\n(태그형 속성, 메모형 카드 보기, 기록/갤러리/캘린더)')
-      return
-    }
-
     runningRef.current = true
     setMenu(null)
-
     try {
       await exportActiveTabImage(options)
     } catch (err) {
@@ -121,6 +120,30 @@ export default function ExportCameraButton() {
     } finally {
       runningRef.current = false
     }
+  }
+
+  const runExport = async () => {
+    if (runningRef.current || exportInProgress) return
+
+    if (!isTabImageExportable(state.activeTab, state.settings)) {
+      alert('이 탭에서는 이미지 내보내기를 사용할 수 없습니다.\n(태그형 속성, 메모형 카드 보기, 기록/갤러리/캘린더)')
+      return
+    }
+
+    if (shouldConfirmLockExport(state.settings)) {
+      setLockWarnOpen(true)
+      return
+    }
+
+    await doExport()
+  }
+
+  const confirmLockWarn = async (skipAsk) => {
+    if (skipAsk) {
+      dispatch({ type: 'UPDATE_SETTINGS', payload: { confirmLockExportWarning: false } })
+    }
+    setLockWarnOpen(false)
+    await doExport()
   }
 
   return (
@@ -151,6 +174,17 @@ export default function ExportCameraButton() {
           options={options}
           onChange={updateOptions}
           onClose={() => setMenu(null)}
+        />
+      )}
+      {lockWarnOpen && (
+        <DeleteConfirmDialog
+          title="안내"
+          message={LOCK_EXPORT_WARNING_MESSAGE}
+          skipAskLabel="다시 질문하지 않기"
+          confirmLabel="진행"
+          confirmClassName="flex-1 rounded-lg bg-[var(--color-accent)] py-2 text-sm text-white hover:opacity-90"
+          onConfirm={confirmLockWarn}
+          onCancel={() => setLockWarnOpen(false)}
         />
       )}
     </>

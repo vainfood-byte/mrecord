@@ -1,13 +1,18 @@
 import { memo, useCallback, useMemo, useRef, useState } from 'react'
 import { Crop, Trash2 } from 'lucide-react'
+import { Virtualizer } from 'virtua'
 import { useApp } from '../../context/AppContext'
+import { useMainScrollRef } from '../../context/MainScrollContext'
 import { useRecordListView } from '../../hooks/useRecordListView'
+import { useGridColumnCount } from '../../hooks/useGridColumnCount'
 import { isRecordLocked } from '../../components/layout/LockToggle'
 import { GalleryAddCard } from '../../components/ui/AddRecordCard'
 import CoverUploadPlaceholder from '../../components/ui/CoverUploadPlaceholder'
+import LazyImage from '../../components/ui/LazyImage'
 import CoverCropEditor from '../../components/calendar/CoverCropEditor'
 import { useClipboardPaste } from '../../hooks/useClipboardPaste'
 import { GALLERY_CARD_SIZES, getGalleryCardWidth } from '../../constants/galleryCardSizes'
+import { GALLERY_GRID_GAP, VIRTUAL_THRESHOLD } from '../../constants/virtualization'
 import { coverPlaceholderStyle } from '../../utils/colorUtils'
 import { offscreenCardHint } from '../../utils/renderHints'
 import {
@@ -85,6 +90,7 @@ function MemoCardBackground({
   locked,
   showCoverControls,
   eagerCover,
+  cacheKey,
   onUpload,
   onCrop,
   onDeleteCover,
@@ -111,12 +117,11 @@ function MemoCardBackground({
   if (imageState.url) {
     return (
       <>
-        <img
+        <LazyImage
           src={imageState.url}
-          data-cover-url={imageState.url}
           alt={rec.title}
-          loading={eagerCover ? 'eager' : 'lazy'}
-          decoding={eagerCover ? 'sync' : 'async'}
+          cacheKey={cacheKey}
+          eager={eagerCover}
           className={`absolute inset-0 h-full w-full object-cover ${blurCover ? 'scale-110 blur-md' : ''}`}
           draggable={false}
         />
@@ -174,6 +179,7 @@ const MemoCardV1 = memo(function MemoCardV1({
   rec,
   field,
   cardWidth,
+  fillWidth = false,
   blurCoverImage,
   blurTitle,
   gradient,
@@ -197,8 +203,8 @@ const MemoCardV1 = memo(function MemoCardV1({
     <div
       data-memo-card-export
       data-maintain-layout={maintainLayout ? '' : undefined}
-      className="group overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-      style={{ width: cardWidth }}
+      className="group min-w-0 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+      style={{ width: fillWidth ? '100%' : cardWidth }}
       onContextMenu={onCardContextMenu}
     >
       <div
@@ -227,6 +233,7 @@ const MemoCardV1 = memo(function MemoCardV1({
           locked={locked}
           showCoverControls={showCoverControls}
           eagerCover={eagerCover}
+          cacheKey={`${rec.id}:${field.id}`}
           onUpload={onUpload}
           onCrop={onCrop}
           onDeleteCover={onDeleteCover}
@@ -270,6 +277,7 @@ const MemoCardV2 = memo(function MemoCardV2({
   rec,
   field,
   cardWidth,
+  fillWidth = false,
   blurCoverImage,
   blurTitle,
   gradient,
@@ -295,8 +303,8 @@ const MemoCardV2 = memo(function MemoCardV2({
     <div
       data-memo-card-export
       data-maintain-layout={maintainLayout ? '' : undefined}
-      className="group overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-      style={{ width: cardWidth }}
+      className="group min-w-0 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+      style={{ width: fillWidth ? '100%' : cardWidth }}
       onContextMenu={onCardContextMenu}
     >
       <div
@@ -317,6 +325,7 @@ const MemoCardV2 = memo(function MemoCardV2({
           locked={locked}
           showCoverControls={showCoverControls}
           eagerCover={eagerCover}
+          cacheKey={`${rec.id}:${field.id}`}
           onUpload={onUpload}
           onCrop={onCrop}
           onDeleteCover={onDeleteCover}
@@ -380,18 +389,272 @@ const MemoCardV2 = memo(function MemoCardV2({
   )
 })
 
-function MemoCardView({ field, sorted, tabSettings, onUpdateSettings }) {
+function buildMemoCardProps({
+  rec,
+  field,
+  cardWidth,
+  fillColumns,
+  tabSettings,
+  displayTextSizePx,
+  lock,
+  exportInProgress,
+  dispatch,
+  openCardMenu,
+  openUpload,
+  setCropState,
+  deleteRecordCover
+}) {
+  const locked = isRecordLocked(rec, lock)
+  const imageState = getMemoCardImageState(rec, field.id)
+  const blurCoverImage = locked || (tabSettings.hideCover && imageState.mode !== 'upload')
+  return {
+    rec,
+    field,
+    cardWidth,
+    fillWidth: fillColumns,
+    blurCoverImage,
+    blurTitle: locked,
+    locked,
+    gradient: tabSettings.gradient,
+    textSizePx: displayTextSizePx,
+    maintainLayout: tabSettings.maintainLayout,
+    imageState,
+    eagerCover: exportInProgress,
+    dispatch,
+    onCardContextMenu: (e) => openCardMenu(e, rec.id),
+    onUpload: () => openUpload(rec),
+    onCrop: () => {
+      if (imageState.url) setCropState({ rec, imageUrl: imageState.url })
+    },
+    onDeleteCover: () => deleteRecordCover(rec),
+    onChangeCover: () => openUpload(rec)
+  }
+}
+
+function renderMemoCardCell({
+  index,
+  records,
+  field,
+  cardWidth,
+  cardHeight,
+  tabSettings,
+  displayTextSizePx,
+  lock,
+  exportInProgress,
+  dispatch,
+  openCardMenu,
+  openUpload,
+  setCropState,
+  deleteRecordCover,
+  fillColumns = false
+}) {
+  const totalSlots = records.length + 1
+  if (index >= totalSlots) return null
+
+  if (index === records.length) {
+    return (
+      <GalleryAddCard
+        key="memo-add-card"
+        onClick={() => dispatch({ type: 'CREATE_NEW_RECORD' })}
+        width={cardWidth}
+        fillWidth={fillColumns}
+      />
+    )
+  }
+
+  const rec = records[index]
+  const cardProps = buildMemoCardProps({
+    rec,
+    field,
+    cardWidth,
+    fillColumns,
+    tabSettings,
+    displayTextSizePx,
+    lock,
+    exportInProgress,
+    dispatch,
+    openCardMenu,
+    openUpload,
+    setCropState,
+    deleteRecordCover
+  })
+
+  return (
+    <div
+      key={rec.id}
+      data-memo-card
+      style={{
+        width: fillColumns ? '100%' : cardWidth,
+        minWidth: 0,
+        minHeight: cardHeight,
+        ...offscreenCardHint(cardWidth, cardHeight)
+      }}
+    >
+      {tabSettings.cardVersion === 'v2' ? <MemoCardV2 {...cardProps} /> : <MemoCardV1 {...cardProps} />}
+    </div>
+  )
+}
+
+const MemoGridRow = memo(function MemoGridRow({
+  rowIndex,
+  columnCount,
+  records,
+  field,
+  cardWidth,
+  cardHeight,
+  gap,
+  tabSettings,
+  displayTextSizePx,
+  lock,
+  exportInProgress,
+  dispatch,
+  openCardMenu,
+  openUpload,
+  setCropState,
+  deleteRecordCover,
+  fillColumns = false
+}) {
+  const start = rowIndex * columnCount
+
+  return (
+    <div
+      className="grid w-full justify-start"
+      style={{
+        width: '100%',
+        gridTemplateColumns: fillColumns
+          ? `repeat(${columnCount}, minmax(${cardWidth}px, 1fr))`
+          : `repeat(${columnCount}, ${cardWidth}px)`,
+        columnGap: gap,
+        justifyContent: 'start',
+        minHeight: cardHeight,
+        marginBottom: gap
+      }}
+    >
+      {Array.from({ length: columnCount }, (_, col) => {
+        const index = start + col
+        const totalSlots = records.length + 1
+        if (index >= totalSlots) {
+          return (
+            <div
+              key={`empty-${rowIndex}-${col}`}
+              aria-hidden
+              style={{ width: fillColumns ? '100%' : cardWidth, minWidth: 0 }}
+            />
+          )
+        }
+        return renderMemoCardCell({
+          index,
+          records,
+          field,
+          cardWidth,
+          cardHeight,
+          tabSettings,
+          displayTextSizePx,
+          lock,
+          exportInProgress,
+          dispatch,
+          openCardMenu,
+          openUpload,
+          setCropState,
+          deleteRecordCover,
+          fillColumns
+        })
+      })}
+    </div>
+  )
+})
+
+function MemoFlatGrid({
+  records,
+  field,
+  cardWidth,
+  cardHeight,
+  tabSettings,
+  displayTextSizePx,
+  lock,
+  exportInProgress,
+  dispatch,
+  openCardMenu,
+  openUpload,
+  setCropState,
+  deleteRecordCover,
+  onContextMenu,
+  fillColumns = false
+}) {
+  return (
+    <div
+      data-memo-export-root
+      className="grid w-full min-w-0 justify-start gap-4"
+      style={{
+        width: '100%',
+        maxWidth: 'none',
+        gridTemplateColumns: fillColumns
+          ? `repeat(auto-fill, minmax(${cardWidth}px, 1fr))`
+          : `repeat(auto-fill, ${cardWidth}px)`,
+        justifyContent: 'start'
+      }}
+      onContextMenu={onContextMenu}
+    >
+      {records.map((rec) => {
+        const cardProps = buildMemoCardProps({
+          rec,
+          field,
+          cardWidth,
+          fillColumns,
+          tabSettings,
+          displayTextSizePx,
+          lock,
+          exportInProgress,
+          dispatch,
+          openCardMenu,
+          openUpload,
+          setCropState,
+          deleteRecordCover
+        })
+        return (
+          <div
+            key={rec.id}
+            data-memo-card
+            style={{
+              width: fillColumns ? '100%' : cardWidth,
+              minWidth: 0,
+              ...offscreenCardHint(cardWidth, cardHeight)
+            }}
+          >
+            {tabSettings.cardVersion === 'v2' ? (
+              <MemoCardV2 {...cardProps} />
+            ) : (
+              <MemoCardV1 {...cardProps} />
+            )}
+          </div>
+        )
+      })}
+      <GalleryAddCard
+        onClick={() => dispatch({ type: 'CREATE_NEW_RECORD' })}
+        width={cardWidth}
+        fillWidth={fillColumns}
+      />
+    </div>
+  )
+}
+
+function MemoCardView({ field, sorted, tabSettings, onUpdateSettings, pagedView }) {
   const { state, dispatch } = useApp()
+  const mainScrollRef = useMainScrollRef()
   const lock = state.settings.lockSettings
   const exportInProgress = state.exportInProgress
   const cardWidth = getGalleryCardWidth(tabSettings.cardSize)
+  /* 사이드 패널 열림: 어두운 테마/갤러리와 동일하게 minmax(1fr)로 남은 폭 밀착 */
+  const fillColumns = state.detailMode === 'side'
   const textSizePx = getMemoTextSizePx(tabSettings.textSize)
   const displayTextSizePx = exportInProgress ? getMemoExportTextSizePx() : textSizePx
   const [cardMenu, setCardMenu] = useState(null)
   const [cropState, setCropState] = useState(null)
   const fileRef = useRef(null)
+  const containerRef = useRef(null)
   const gridRef = useRef(null)
   const [uploadTargetId, setUploadTargetId] = useState(null)
+  const columnCount = useGridColumnCount(containerRef, cardWidth, GALLERY_GRID_GAP)
 
   const updateRecordCover = (rec, coverUrl) => {
     dispatch({
@@ -400,17 +663,20 @@ function MemoCardView({ field, sorted, tabSettings, onUpdateSettings }) {
     })
   }
 
-  const deleteRecordCover = (rec) => {
-    dispatch({
-      type: 'UPDATE_RECORD',
-      payload: { ...rec, ...clearMemoCover(rec, field.id) }
-    })
-  }
+  const deleteRecordCover = useCallback(
+    (rec) => {
+      dispatch({
+        type: 'UPDATE_RECORD',
+        payload: { ...rec, ...clearMemoCover(rec, field.id) }
+      })
+    },
+    [dispatch, field.id]
+  )
 
-  const openUpload = (rec) => {
+  const openUpload = useCallback((rec) => {
     setUploadTargetId(rec.id)
     fileRef.current?.click()
-  }
+  }, [])
 
   const handleFile = (e) => {
     const file = e.target.files?.[0]
@@ -437,7 +703,12 @@ function MemoCardView({ field, sorted, tabSettings, onUpdateSettings }) {
       setUploadTargetId(null)
     },
     {
-      shouldIgnore: () => !gridRef.current?.matches(':hover') || !uploadTargetId
+      shouldIgnore: () => {
+        const hovered =
+          Boolean(gridRef.current?.matches(':hover')) ||
+          Boolean(containerRef.current?.matches(':hover'))
+        return !hovered || !uploadTargetId
+      }
     }
   )
 
@@ -448,6 +719,18 @@ function MemoCardView({ field, sorted, tabSettings, onUpdateSettings }) {
   }, [])
 
   const cardHeight = Math.round(cardWidth * (4 / 3) + 44)
+  const rowHeight = cardHeight + GALLERY_GRID_GAP
+  const rowCount = Math.ceil((sorted.length + 1) / columnCount)
+  const rowIndexes = useMemo(() => Array.from({ length: rowCount }, (_, i) => i), [rowCount])
+  /* V2 + 규격유지 해제 시 행 높이 가변 → itemSize 없이 Virtua 실측 */
+  const fixedCardHeight =
+    tabSettings.cardVersion !== 'v2' || tabSettings.maintainLayout === true
+  const useVirtual =
+    mainScrollRef &&
+    !exportInProgress &&
+    !state.exportRecordSlice &&
+    !pagedView &&
+    sorted.length >= VIRTUAL_THRESHOLD
 
   const colorOptions = [
     ['black', { label: '블랙' }],
@@ -455,58 +738,84 @@ function MemoCardView({ field, sorted, tabSettings, onUpdateSettings }) {
     ['theme', { label: '테마' }]
   ]
 
+  const rowProps = useMemo(
+    () => ({
+      columnCount,
+      records: sorted,
+      field,
+      cardWidth,
+      cardHeight,
+      gap: GALLERY_GRID_GAP,
+      tabSettings,
+      displayTextSizePx,
+      lock,
+      exportInProgress,
+      dispatch,
+      openCardMenu,
+      openUpload,
+      setCropState,
+      deleteRecordCover,
+      fillColumns
+    }),
+    [
+      columnCount,
+      sorted,
+      field,
+      cardWidth,
+      cardHeight,
+      tabSettings,
+      displayTextSizePx,
+      lock,
+      exportInProgress,
+      dispatch,
+      openCardMenu,
+      openUpload,
+      deleteRecordCover,
+      fillColumns
+    ]
+  )
+
   return (
     <>
-      <div
-        ref={gridRef}
-        data-memo-export-root
-        className="grid justify-start gap-4"
-        style={{ gridTemplateColumns: `repeat(auto-fill, ${cardWidth}px)` }}
-        onContextMenu={openCardMenu}
-      >
-        {sorted.map((rec) => {
-          const locked = isRecordLocked(rec, lock)
-          const imageState = getMemoCardImageState(rec, field.id)
-          const blurCoverImage =
-            locked || (tabSettings.hideCover && imageState.mode !== 'upload')
-          const blurTitle = locked
-
-          const cardProps = {
-            rec,
-            field,
-            cardWidth,
-            blurCoverImage,
-            blurTitle,
-            locked,
-            gradient: tabSettings.gradient,
-            textSizePx: displayTextSizePx,
-            maintainLayout: tabSettings.maintainLayout,
-            imageState,
-            eagerCover: exportInProgress,
-            dispatch,
-            onCardContextMenu: (e) => openCardMenu(e, rec.id),
-            onUpload: () => openUpload(rec),
-            onCrop: () => {
-              if (imageState.url) setCropState({ rec, imageUrl: imageState.url })
-            },
-            onDeleteCover: () => deleteRecordCover(rec),
-            onChangeCover: () => openUpload(rec)
-          }
-
-          return (
-            <div key={rec.id} data-memo-card style={offscreenCardHint(cardWidth, cardHeight)}>
-              {tabSettings.cardVersion === 'v2' ? (
-                <MemoCardV2 {...cardProps} />
-              ) : (
-                <MemoCardV1 {...cardProps} />
-              )}
-            </div>
-          )
-        })}
-        <GalleryAddCard
-          onClick={() => dispatch({ type: 'CREATE_NEW_RECORD' })}
-          width={cardWidth}
-        />
+      <div ref={containerRef} className="w-full min-w-0" style={{ width: '100%', maxWidth: 'none' }}>
+        {useVirtual ? (
+          <div
+            ref={gridRef}
+            data-memo-export-root
+            className="w-full min-w-0"
+            style={{ width: '100%', maxWidth: 'none' }}
+            onContextMenu={openCardMenu}
+          >
+            <Virtualizer
+              scrollRef={mainScrollRef}
+              data={rowIndexes}
+              {...(fixedCardHeight ? { itemSize: rowHeight } : {})}
+              bufferSize={rowHeight * 2}
+            >
+              {(rowIndex) => <MemoGridRow rowIndex={rowIndex} {...rowProps} />}
+            </Virtualizer>
+          </div>
+        ) : (
+          <div ref={gridRef}>
+            <MemoFlatGrid
+              records={sorted}
+              field={field}
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
+              tabSettings={tabSettings}
+              displayTextSizePx={displayTextSizePx}
+              lock={lock}
+              exportInProgress={exportInProgress}
+              dispatch={dispatch}
+              openCardMenu={openCardMenu}
+              openUpload={openUpload}
+              setCropState={setCropState}
+              deleteRecordCover={deleteRecordCover}
+              onContextMenu={openCardMenu}
+              fillColumns={fillColumns}
+            />
+          </div>
+        )}
       </div>
 
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
@@ -608,7 +917,7 @@ function MemoCardView({ field, sorted, tabSettings, onUpdateSettings }) {
 
 export default function MemoLinkPropertyView({ field }) {
   const { state, dispatch } = useApp()
-  const { records } = useRecordListView()
+  const { records, pagedView } = useRecordListView()
   const tabSettings = getMemoTabSettings(state.settings, field.id)
 
   const updateTabSettings = (patch) => {
@@ -626,6 +935,7 @@ export default function MemoLinkPropertyView({ field }) {
       sorted={records}
       tabSettings={tabSettings}
       onUpdateSettings={updateTabSettings}
+      pagedView={pagedView}
     />
   )
 }

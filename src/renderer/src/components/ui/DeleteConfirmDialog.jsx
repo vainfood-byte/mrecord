@@ -11,7 +11,8 @@ export default function DeleteConfirmDialog({
   onCancel,
   showSkipAsk = true,
   skipAskLabel = '다시 묻지 않기',
-  confirmLabel = '삭제'
+  confirmLabel = '삭제',
+  confirmClassName = 'flex-1 rounded-lg bg-red-500 py-2 text-sm text-white hover:bg-red-600'
 }) {
   const [skipAsk, setSkipAsk] = useState(false)
 
@@ -31,7 +32,7 @@ export default function DeleteConfirmDialog({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h3 className="mb-2 font-semibold">{title}</h3>
-        <p className="mb-4 text-sm text-[var(--color-text-muted)]">{message}</p>
+        <p className="mb-4 whitespace-pre-line text-sm text-[var(--color-text-muted)]">{message}</p>
         {showSkipAsk && (
           <label className="mb-4 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             <input
@@ -53,7 +54,7 @@ export default function DeleteConfirmDialog({
           <button
             type="button"
             onClick={() => onConfirm(skipAsk)}
-            className="flex-1 rounded-lg bg-red-500 py-2 text-sm text-white hover:bg-red-600"
+            className={confirmClassName}
           >
             {confirmLabel}
           </button>

@@ -1,9 +1,10 @@
 import { useRef, useState, useEffect, useCallback, memo } from 'react'
-import { Camera, ChevronLeft, ChevronRight, Feather, Image as ImageIcon, Save, X } from 'lucide-react'
+import { Camera, Feather, Image as ImageIcon, Save } from 'lucide-react'
 import { useApp, useSelectedRecord, useTagsMap } from '../../context/AppContext'
 import CoverCropEditor from '../calendar/CoverCropEditor'
 import EditBox from './EditBox'
 import ReviewImageToolbar from './ReviewImageToolbar'
+import ReviewImageViewer from './ReviewImageViewer'
 import QuoteWrapMenu, { wrapRangeWithQuotes } from './QuoteWrapMenu'
 import CharInsertMenu from '../ui/CharInsertMenu'
 import { exportFullRecord, buildSeriesReviewSections } from '../../utils/exportFullRecord'
@@ -15,7 +16,7 @@ import { useDragResize } from '../../hooks/useClipboardPaste'
 import { createReviewContentSaver } from '../../utils/reviewContentSaver'
 import { FLUSH_PENDING_SAVES_EVENT } from '../../utils/storage'
 import { insertTextAtCursor as insertTextIntoEditor } from '../../utils/insertTextAtCursor'
-import { OVERLAY_ABOVE_SIDE_PANEL } from '../../constants/overlayZIndex'
+import { hydrateRecord } from '../../utils/recordHeavyStore'
 
 /** 본문 이미지 리플로우 병목 차단 — GPU 레이어 분리 */
 function applyReviewImgPerfStyle(img) {
@@ -262,9 +263,10 @@ function ReviewEditor({
     (patch, target) => {
       if (!target?.recordId) return
       // 동일 이벤트 내 연속 저장 시 recordsRef는 아직 이전 스냅샷일 수 있음 → recordRef 우선
+      const fromList = recordsRef.current?.find((r) => r.id === target.recordId)
       const rec =
         (recordRef.current?.id === target.recordId ? recordRef.current : null) ||
-        recordsRef.current?.find((r) => r.id === target.recordId)
+        (fromList ? hydrateRecord(fromList) : null)
       if (!rec) return
 
       if (target.volume != null) {
@@ -415,13 +417,13 @@ function ReviewEditor({
       // dblclick + pointer 더블탭 이중 실행 차단
       if (now - (imgDblTapRef.current.openedAt || 0) < 400) return
       const imgs = [...editor.querySelectorAll('img')]
-      const urls = imgs.map((node) => node.currentSrc || node.src).filter(Boolean)
       const index = Math.max(0, imgs.indexOf(img))
-      if (!urls.length) return
+      if (!imgs.length || index < 0) return
       imgDblTapRef.current = { img: null, time: 0, x: 0, y: 0, openedAt: now }
       setSelectedImg(null)
       setCropSrc(null)
-      setImageViewer({ urls, index })
+      /* Base64 URL 배열을 state에 넣지 않음 — index만 보관, src는 DOM에서 resolve */
+      setImageViewer({ index, count: imgs.length })
     }
 
     const onPointerDown = (e) => {
@@ -527,34 +529,25 @@ function ReviewEditor({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedImg, cropSrc, scheduleContentSave])
 
-  useEffect(() => {
-    if (!imageViewer) return undefined
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setImageViewer(null)
-        return
-      }
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        setImageViewer((prev) => {
-          if (!prev?.urls?.length) return prev
-          const next = (prev.index - 1 + prev.urls.length) % prev.urls.length
-          return { ...prev, index: next }
-        })
-        return
-      }
-      if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        setImageViewer((prev) => {
-          if (!prev?.urls?.length) return prev
-          const next = (prev.index + 1) % prev.urls.length
-          return { ...prev, index: next }
-        })
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [imageViewer])
+  const resolveViewerSrc = useCallback((i) => {
+    const imgs = editorRef.current?.querySelectorAll?.('img')
+    if (!imgs?.length) return ''
+    const node = imgs[i]
+    return node?.currentSrc || node?.src || ''
+  }, [])
+
+  const navigateViewer = useCallback((delta) => {
+    setImageViewer((prev) => {
+      if (!prev) return prev
+      const imgs = editorRef.current?.querySelectorAll?.('img')
+      const count = imgs?.length || prev.count || 0
+      if (count <= 0) return null
+      const next = (prev.index + delta + count) % count
+      return { index: next, count }
+    })
+  }, [])
+
+  const closeViewer = useCallback(() => setImageViewer(null), [])
 
   /** 회차/작품 전환 시 로컬 UI만 경량 리셋 (본문 DOM은 flush 이후 load effect에서 교체) */
   useEffect(() => {
@@ -1167,77 +1160,13 @@ function ReviewEditor({
       )}
 
       {imageViewer && (
-        <div
-          className="fixed inset-0 flex items-center justify-center bg-black/70"
-          style={{
-            // 이미지 편집 UI(z-[100002])·사이드 패널보다 위
-            zIndex: Math.max(OVERLAY_ABOVE_SIDE_PANEL, 100100),
-            WebkitAppRegion: 'no-drag'
-          }}
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setImageViewer(null)
-          }}
-          role="dialog"
-          aria-modal="true"
-          aria-label="본문 이미지 보기"
-        >
-          <button
-            type="button"
-            className="absolute right-4 top-4 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-            onClick={() => setImageViewer(null)}
-            title="닫기"
-          >
-            <X size={18} />
-          </button>
-          {imageViewer.urls.length > 1 && (
-            <>
-              <button
-                type="button"
-                className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 md:left-6"
-                onClick={() =>
-                  setImageViewer((prev) => {
-                    if (!prev?.urls?.length) return prev
-                    return {
-                      ...prev,
-                      index: (prev.index - 1 + prev.urls.length) % prev.urls.length
-                    }
-                  })
-                }
-                title="이전 이미지"
-              >
-                <ChevronLeft size={22} />
-              </button>
-              <button
-                type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 md:right-6"
-                onClick={() =>
-                  setImageViewer((prev) => {
-                    if (!prev?.urls?.length) return prev
-                    return {
-                      ...prev,
-                      index: (prev.index + 1) % prev.urls.length
-                    }
-                  })
-                }
-                title="다음 이미지"
-              >
-                <ChevronRight size={22} />
-              </button>
-            </>
-          )}
-          <img
-            src={imageViewer.urls[imageViewer.index]}
-            alt=""
-            className="max-h-[88vh] max-w-[92vw] object-contain"
-            draggable={false}
-            style={{ contain: 'layout paint', willChange: 'transform' }}
-          />
-          {imageViewer.urls.length > 1 && (
-            <p className="absolute bottom-4 text-xs text-white/80">
-              {imageViewer.index + 1} / {imageViewer.urls.length}
-            </p>
-          )}
-        </div>
+        <ReviewImageViewer
+          index={imageViewer.index}
+          count={imageViewer.count}
+          resolveSrc={resolveViewerSrc}
+          onClose={closeViewer}
+          onNavigate={navigateViewer}
+        />
       )}
     </div>
   )

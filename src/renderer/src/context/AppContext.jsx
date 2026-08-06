@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useReducer, useRef, useMemo, useCallback, useState, startTransition } from 'react'
+import { createContext, useContext, useEffect, useReducer, useRef, useMemo, useCallback, useState, startTransition, useDeferredValue } from 'react'
 import {
   DEFAULT_SETTINGS,
   DEFAULT_TAGS,
@@ -10,12 +10,29 @@ import {
 import { migrateSettings, mergeTags, getVisibleTabs, isCoreTab } from '../utils/tabHelpers'
 import { SAMPLE_RECORDS } from '../data/sampleRecords'
 import { createEmptyRecord, createRecordFromSource, recordDraftFingerprint } from '../utils/recordHelpers'
-import { saveData, buildDefaultAppState, buildPersistedData, flushAllPersistedData, flushPendingSaves, loadBestPersistedData, schedulePersistedData, commitPersistedData } from '../utils/storage'
+import { saveData, buildDefaultAppState, buildEmptyPersistedData, buildPersistedData, flushAllPersistedData, flushPendingSaves, loadBestPersistedData, schedulePersistedData, commitPersistedData } from '../utils/storage'
 import { applyPresetUiState, extractPresetData, EMPTY_PRESETS, ensurePresets, getActivePresetSlot, resolveActivePresetState, sanitizeAllPresets } from '../utils/presets'
 import { reorderStickers } from '../utils/stickerHelpers'
 import { pushPetitStickerLibrary } from '../utils/calendarHelpers'
-import { filterRecords } from '../utils/recordFilters'
+import { buildRecordListIndex, filterRecordsOnly, sortRecordsList } from '../utils/recordFilters'
 import { remapTagsToCustomPalette, remapRecordsCoverToCustomPalette } from '../utils/tagColorHelpers'
+import {
+  migrateBase64RecordCovers,
+  ensureMissingCoverThumbnails,
+  isBase64CoverUrl
+} from '../utils/coverImageHelpers'
+import {
+  HEAVY_RECORD_FIELDS,
+  getRecordHeavy,
+  hydrateRecord,
+  ingestRecordHeavy,
+  ingestRecordsHeavy,
+  isHeavyRecordField,
+  removeRecordHeavy,
+  removeRecordsHeavy,
+  syncRecordHeavyFromPayload,
+  toListRecord
+} from '../utils/recordHeavyStore'
 
 function uiSnapshot(state) {
   return {
@@ -40,8 +57,6 @@ function stateWithPresetUiSync(state, patch) {
   }
 }
 
-const REVIEW_ONLY_FIELDS = new Set(['review', 'reviewSubtitle', 'reviewImages', 'volumeReviews'])
-
 function recordsDiffIsReviewOnly(prevRecords, nextRecords) {
   if (prevRecords === nextRecords) return false
   if (!prevRecords || !nextRecords || prevRecords.length !== nextRecords.length) return false
@@ -52,10 +67,11 @@ function recordsDiffIsReviewOnly(prevRecords, nextRecords) {
     if (a === b) continue
     if (a.id !== b.id) return false
     for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-      if (REVIEW_ONLY_FIELDS.has(key)) continue
+      if (isHeavyRecordField(key) || key === '__heavyRev') continue
       if (a[key] !== b[key]) return false
     }
     if (
+      (a.__heavyRev || 0) !== (b.__heavyRev || 0) ||
       a.review !== b.review ||
       a.reviewSubtitle !== b.reviewSubtitle ||
       a.reviewImages !== b.reviewImages ||
@@ -67,6 +83,21 @@ function recordsDiffIsReviewOnly(prevRecords, nextRecords) {
     }
   }
   return sawReviewChange
+}
+
+/** UPDATE 시 heavy 스토어 동기화 + 목록용 레코드 생성 */
+function commitRecordToListState(prevListRecord, payload) {
+  const prevHeavy = payload?.id ? getRecordHeavy(payload.id) : null
+  const nextHeavy = payload?.id ? syncRecordHeavyFromPayload(payload.id, payload) : null
+  const list = toListRecord(payload)
+  const heavyTouched =
+    Boolean(payload?.id) &&
+    HEAVY_RECORD_FIELDS.some((key) => key in payload) &&
+    prevHeavy !== nextHeavy
+  const heavyRev = heavyTouched
+    ? (prevListRecord?.__heavyRev || 0) + 1
+    : prevListRecord?.__heavyRev || 0
+  return heavyRev ? { ...list, __heavyRev: heavyRev } : list
 }
 
 function isSelectedRecordMissing(state, nextRecords) {
@@ -168,28 +199,55 @@ const initialState = {
   easterEggResetEpoch: 0
 }
 
+/** 누락 필드만 채우고, 이미 완전한 레코드는 JSON parse 객체를 그대로 재사용 */
+function normalizeLoadedRecord(r) {
+  if (!r || typeof r !== 'object') return r
+  const needsSeries = r.series == null
+  const needsReviewImages = r.reviewImages == null
+  const needsVolumeReviews = r.volumeReviews == null
+  const needsReviewSubtitle = r.reviewSubtitle == null
+  const needsCustomFields = r.customFields == null
+  const needsTagFieldValues = r.tagFieldValues == null
+  if (
+    !needsSeries &&
+    !needsReviewImages &&
+    !needsVolumeReviews &&
+    !needsReviewSubtitle &&
+    !needsCustomFields &&
+    !needsTagFieldValues
+  ) {
+    return r
+  }
+  return {
+    ...(needsSeries ? { series: { enabled: false, unit: '권', volumes: [1] } } : null),
+    ...(needsReviewImages ? { reviewImages: [] } : null),
+    ...(needsVolumeReviews ? { volumeReviews: {} } : null),
+    ...(needsReviewSubtitle ? { reviewSubtitle: '' } : null),
+    ...(needsCustomFields ? { customFields: {} } : null),
+    ...(needsTagFieldValues ? { tagFieldValues: {} } : null),
+    ...r
+  }
+}
+
 export function buildInitPayload(saved) {
   const session = saved.session || {}
   const lock = {
     ...DEFAULT_SETTINGS.lockSettings,
     ...saved.settings?.lockSettings
   }
-  const records = (saved.records ?? SAMPLE_RECORDS).map((r) => ({
-    series: { enabled: false, unit: '권', volumes: [1] },
-    reviewImages: [],
-    volumeReviews: {},
-    reviewSubtitle: '',
-    customFields: {},
-    tagFieldValues: {},
-    ...r
-  }))
+  const rawRecords = saved.records ?? SAMPLE_RECORDS
+  const normalized = rawRecords.map((r) => normalizeLoadedRecord(r))
+  /* 고용량 감상 필드는 스토어로 분리 — React 목록 state는 경량 레코드만 유지 */
+  const records = ingestRecordsHeavy(normalized, { replace: true })
   const selectedId = session.selectedRecordId
   const hasSelection = selectedId && records.some((r) => r.id === selectedId)
+  const { lockSettings: _ignoredLock, ...savedSettingsRest } = saved.settings || {}
+  void _ignoredLock
   return {
     records,
     tags: mergeTags(saved.tags ?? [], DEFAULT_TAGS),
     settings: {
-      ...saved.settings,
+      ...savedSettingsRest,
       lockSettings: lock.lockOnStartup ? { ...lock, enabled: true } : lock
     },
     activeTab: session.activeTab ?? 'gallery',
@@ -313,12 +371,13 @@ function reducer(state, action) {
       }
     case 'DISMISS_DETAIL': {
       const id = state.selectedRecordId
-      const record = state.records.find((r) => r.id === id)
+      const record = hydrateRecord(state.records.find((r) => r.id === id))
       const unchanged =
         state.detailIsDraft &&
         !state.detailTitleEdited &&
         record &&
         state.detailDraftSnapshot === recordDraftFingerprint(record)
+      if (unchanged && id) removeRecordHeavy(id)
       return {
         ...state,
         records: unchanged ? state.records.filter((r) => r.id !== id) : state.records,
@@ -595,44 +654,67 @@ function reducer(state, action) {
         }))
       }
     }
-    case 'ADD_RECORD':
-      return { ...state, records: [action.payload, ...state.records] }
+    case 'ADD_RECORD': {
+      const listRec = ingestRecordHeavy(action.payload)
+      return { ...state, records: [listRec, ...state.records] }
+    }
     case 'CREATE_NEW_RECORD': {
       const { autoEditTitle = true, cloneFrom, cloneFromId, ...patch } = action.payload || {}
       let records = state.records
       const currentId = state.selectedRecordId
       if (state.detailIsDraft && !state.detailTitleEdited && currentId) {
-        const draft = records.find((r) => r.id === currentId)
+        const draft = hydrateRecord(records.find((r) => r.id === currentId))
         if (draft && state.detailDraftSnapshot === recordDraftFingerprint(draft)) {
+          removeRecordHeavy(currentId)
           records = records.filter((r) => r.id !== currentId)
         }
       }
       const sourceId =
         cloneFrom === false ? null : cloneFromId ?? state.selectedRecordId
-      const source = sourceId ? records.find((r) => r.id === sourceId) : null
+      const source = sourceId ? hydrateRecord(records.find((r) => r.id === sourceId)) : null
       const rec = source
         ? createRecordFromSource(source, patch, state.settings)
         : { ...createEmptyRecord(state.settings), ...patch }
+      const listRec = ingestRecordHeavy(rec)
       return {
         ...state,
-        records: [rec, ...records],
+        records: [listRec, ...records],
         selectedRecordId: rec.id,
         selectedVolume: null,
         detailMode: 'side',
-        detailDraftSnapshot: recordDraftFingerprint(rec),
+        detailDraftSnapshot: recordDraftFingerprint(hydrateRecord(listRec)),
         detailIsDraft: true,
         detailEditTitle: Boolean(autoEditTitle),
         detailTitleEdited: false,
         detailSkipSlideIn: state.detailMode === 'side'
       }
     }
-    case 'UPDATE_RECORD':
+    case 'UPDATE_RECORD': {
+      const payload = action.payload
+      if (!payload?.id) return state
+      const prev = state.records.find((r) => r.id === payload.id)
+      const listRec = commitRecordToListState(prev, payload)
       return {
         ...state,
-        records: state.records.map((r) => (r.id === action.payload.id ? action.payload : r))
+        records: state.records.map((r) => (r.id === payload.id ? listRec : r))
       }
+    }
+    /* 백그라운드 썸네일 마이그레이션 — thumbnailUrl만 병합 (다른 편집 보존) */
+    case 'MERGE_RECORD_THUMBNAILS': {
+      const byId = action.payload
+      if (!byId || typeof byId !== 'object') return state
+      let changed = false
+      const records = state.records.map((r) => {
+        const thumb = byId[r.id]
+        if (typeof thumb !== 'string' || !thumb || r.thumbnailUrl === thumb) return r
+        changed = true
+        return { ...r, thumbnailUrl: thumb }
+      })
+      return changed ? { ...state, records } : state
+    }
     case 'DELETE_RECORD': {
       const id = action.payload
+      removeRecordHeavy(id)
       const nextRecords = state.records.filter((r) => r.id !== id)
       const clearDetail = isSelectedRecordMissing(state, nextRecords)
       return {
@@ -645,6 +727,7 @@ function reducer(state, action) {
     }
     case 'DELETE_RECORDS': {
       const ids = new Set(action.payload || [])
+      removeRecordsHeavy(ids)
       const nextRecords = state.records.filter((r) => !ids.has(r.id))
       const clearDetail = isSelectedRecordMissing(state, nextRecords)
       return {
@@ -912,7 +995,8 @@ function reducer(state, action) {
       }
     case 'RESET_ALL': {
       const fresh = action.payload ?? buildDefaultAppState()
-      return { ...fresh, easterEggResetEpoch: state.easterEggResetEpoch + 1 }
+      const records = ingestRecordsHeavy(fresh.records || [], { replace: true })
+      return { ...fresh, records, easterEggResetEpoch: state.easterEggResetEpoch + 1 }
     }
     default:
       return state
@@ -982,18 +1066,109 @@ export function AppProvider({ children }) {
         if (cancelled) return
 
         if (loaded?.data) {
-          const { data, source } = loaded
-          dispatch({ type: 'INIT', payload: buildInitPayload(data) })
+          let { data } = loaded
+          let coversMigrated = false
 
-          // primary가 아닌 출처에서만 마이그레이션 저장 (매 시작 덮어쓰기 금지)
-          if (source && source !== 'primary') {
+          const flushMigratedData = async (nextData, { bumpRevision = true } = {}) => {
+            const { __loadSource, ...clean } = nextData
+            void __loadSource
+            await commitPersistedData(clean, {
+              bumpRevision,
+              force: true
+            })
+          }
+
+          /*
+           * Base64 → media:// 배치 마이그레이션 (INIT 전)
+           * 15개 단위 + rAF/setTimeout 양보로 메인 스레드 멈춤 방지
+           * 배치마다 mrecord-data.json 비동기 flush (JSON 내 Base64 제거)
+           */
+          try {
+            const prevRecords = data.records || []
+            const needsCoverMigration = prevRecords.some(
+              (r) => isBase64CoverUrl(r?.coverUrl) || isBase64CoverUrl(r?.thumbnailUrl)
+            )
+            if (needsCoverMigration) {
+              const migrateSignal = {
+                get cancelled() {
+                  return cancelled
+                }
+              }
+              const { records, changed } = await migrateBase64RecordCovers(prevRecords, {
+                signal: migrateSignal,
+                onBatchComplete: async ({ records: batchRecords }) => {
+                  if (cancelled) return
+                  const partialData = { ...data, records: batchRecords }
+                  data = partialData
+                  coversMigrated = true
+                  try {
+                    await flushMigratedData(partialData, { bumpRevision: true })
+                  } catch (err) {
+                    console.warn('Cover migration batch flush failed:', err)
+                  }
+                }
+              })
+              if (changed) {
+                data = { ...data, records }
+                coversMigrated = true
+              }
+            }
+          } catch (err) {
+            console.warn('Cover image migration failed:', err)
+          }
+
+          if (cancelled) return
+
+          if (coversMigrated) {
             try {
-              const { __loadSource, ...clean } = data
-              void __loadSource
-              await commitPersistedData(clean, { bumpRevision: false })
+              await flushMigratedData(data, { bumpRevision: true })
             } catch (err) {
               console.warn('Primary data migration save failed:', err)
             }
+          }
+
+          if (cancelled) return
+
+          dispatch({ type: 'INIT', payload: buildInitPayload(data) })
+
+          /* 썸네일 누락분 — UI 차단 없이 백그라운드 생성 후 state 병합(자동 저장) */
+          const recordsForThumbs = data.records || []
+          void (async () => {
+            try {
+              const { records: withThumbs, changed: thumbsChanged } =
+                await ensureMissingCoverThumbnails(recordsForThumbs)
+              if (cancelled || !thumbsChanged) return
+
+              const prevById = new Map()
+              for (const prev of recordsForThumbs) {
+                if (prev?.id) prevById.set(prev.id, prev)
+              }
+              const thumbById = {}
+              for (const rec of withThumbs) {
+                if (rec?.id && typeof rec.thumbnailUrl === 'string' && rec.thumbnailUrl) {
+                  const prev = prevById.get(rec.id)
+                  if (prev?.thumbnailUrl !== rec.thumbnailUrl) {
+                    thumbById[rec.id] = rec.thumbnailUrl
+                  }
+                }
+              }
+              if (!Object.keys(thumbById).length) return
+              dispatch({ type: 'MERGE_RECORD_THUMBNAILS', payload: thumbById })
+            } catch (err) {
+              console.warn('Cover thumbnail migration failed:', err)
+            }
+          })()
+        } else {
+          /*
+           * 주 파일 없음 — 레거시/백업 자동 복구 없이 빈 records로 시작
+           * (Documents mrecord-data.json · backups · .bak 무시)
+           */
+          const empty = buildEmptyPersistedData()
+          dispatch({ type: 'INIT', payload: buildInitPayload(empty) })
+          try {
+            await commitPersistedData(empty, { force: true, bumpRevision: false })
+          } catch (err) {
+            console.warn('Empty primary data seed failed:', err)
           }
         }
       } catch (err) {
@@ -1052,12 +1227,15 @@ export function AppProvider({ children }) {
   const saveTimerRef = useRef(null)
   const latestDataRef = useRef(null)
   const prevRecordsRef = useRef(state.records)
+  /** buildPersistedData는 records를 hydrate하므로, 세션-only 갱신 비교용 목록 참조 */
+  const persistedListRecordsRef = useRef(null)
 
   const persistAll = useCallback(async (options = {}) => {
     flushPendingSaves()
     clearTimeout(saveTimerRef.current)
     const data = buildPersistedData(stateRef.current)
     latestDataRef.current = data
+    persistedListRecordsRef.current = stateRef.current.records
     await flushAllPersistedData(data, options)
     return data
   }, [])
@@ -1067,6 +1245,7 @@ export function AppProvider({ children }) {
       clearTimeout(saveTimerRef.current)
       const data = buildPersistedData(state)
       latestDataRef.current = data
+      persistedListRecordsRef.current = state.records
       saveData(data)
     }
   }, [state.easterEggResetEpoch])
@@ -1077,7 +1256,7 @@ export function AppProvider({ children }) {
     const prev = latestDataRef.current
     if (
       prev &&
-      prev.records === state.records &&
+      persistedListRecordsRef.current === state.records &&
       prev.tags === state.tags &&
       prev.settings === state.settings
     ) {
@@ -1099,6 +1278,7 @@ export function AppProvider({ children }) {
       }
     } else {
       latestDataRef.current = buildPersistedData(state)
+      persistedListRecordsRef.current = state.records
     }
 
     const reviewOnlySave = recordsDiffIsReviewOnly(prevRecordsRef.current, state.records)
@@ -1108,6 +1288,7 @@ export function AppProvider({ children }) {
       if (!bootstrapDoneRef.current || !persistReadyRef.current) return
       const data = buildPersistedData(stateRef.current)
       latestDataRef.current = data
+      persistedListRecordsRef.current = stateRef.current.records
       schedulePersistedData(data)
     }, reviewOnlySave ? 2500 : 600)
 
@@ -1177,9 +1358,30 @@ export function AppProvider({ children }) {
     }
   }, [persistAll])
 
+  /** records 변경 시에만 검색/태그 인덱스 재구축 */
+  const recordListIndex = useMemo(
+    () => buildRecordListIndex(state.records),
+    [state.records]
+  )
+
+  /** 입력·필터 UI를 우선하고, 대용량 목록 재계산은 양보 */
+  const deferredSearchQuery = useDeferredValue(state.searchQuery)
+  const deferredFilterTagIds = useDeferredValue(state.filterTagIds)
+
+  const filteredOnly = useMemo(
+    () =>
+      filterRecordsOnly(
+        state.records,
+        deferredFilterTagIds,
+        deferredSearchQuery,
+        recordListIndex
+      ),
+    [state.records, deferredFilterTagIds, deferredSearchQuery, recordListIndex]
+  )
+
   const filteredRecords = useMemo(
-    () => filterRecords(state),
-    [state.records, state.filterTagIds, state.searchQuery, state.sortBy, state.sortDir]
+    () => sortRecordsList(filteredOnly, state.sortBy, state.sortDir),
+    [filteredOnly, state.sortBy, state.sortDir]
   )
 
   const contextValue = useMemo(
@@ -1213,7 +1415,14 @@ export function useFilteredRecords() {
 
 export function useSelectedRecord() {
   const { state } = useApp()
-  return state.records.find((r) => r.id === state.selectedRecordId) ?? null
+  const listRec = state.selectedRecordId
+    ? state.records.find((r) => r.id === state.selectedRecordId) ?? null
+    : null
+  const heavy = listRec ? getRecordHeavy(listRec.id) : null
+  return useMemo(
+    () => (listRec ? hydrateRecord(listRec) : null),
+    [listRec, heavy]
+  )
 }
 
 export function useTagsMap() {

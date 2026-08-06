@@ -22,15 +22,21 @@ import {
   buildDefaultAppState,
   buildFreshPersistedData,
   buildPersistedData,
+  coercePersistedData,
   saveData,
   flushAllPersistedData
 } from '../../utils/storage'
+import {
+  migrateBase64RecordCovers,
+  isBase64CoverUrl
+} from '../../utils/coverImageHelpers'
 import { useOutsideDismiss } from '../../hooks/useOutsideDismiss'
 import ColorSwatch from '../ui/ColorSwatch'
 import ColorPickerTrigger from '../ui/ColorPickerTrigger'
 import TagColorSettings from '../settings/TagColorSettings'
 import DeleteConfirmDialog from '../ui/DeleteConfirmDialog'
 import { resetInteractionLocks, restoreFocusAfterNativeDialog } from '../../utils/restoreFocusAfterDialog'
+import packageJson from '../../../../../package.json'
 
 export default function SettingsPanel() {
   const { state, dispatch, persistAll, uiPresetSlot } = useApp()
@@ -62,7 +68,8 @@ export default function SettingsPanel() {
   }, [state.easterEggResetEpoch])
 
   useOutsideDismiss(panelRef, state.settingsOpen, () => {
-    dispatch({ type: 'TOGGLE_SETTINGS' })
+    /* 토글이 아닌 닫기 — 다른 핸들러와 겹쳐도 다시 열리지 않음 */
+    if (state.settingsOpen) dispatch({ type: 'TOGGLE_SETTINGS' })
   }, {
     ignoreSelector:
       '[data-settings-trigger], [data-color-picker-popover], [data-color-picker-native], [data-delete-confirm-dialog]',
@@ -284,9 +291,12 @@ export default function SettingsPanel() {
       // 주 파일과 동기화한 뒤, 주 파일 내용(전체 스냅샷)을 내보내기
       await persistAll()
       const result = await window.mrecord?.loadPersistentData?.()
-      if (result?.ok && result.data) {
-        exportData(JSON.parse(result.data))
-        return
+      if (result?.ok && result.data != null) {
+        const payload = coercePersistedData(result.data)
+        if (payload) {
+          exportData(payload)
+          return
+        }
       }
     } catch (err) {
       console.warn('Export from primary file failed, using current state:', err)
@@ -302,7 +312,46 @@ export default function SettingsPanel() {
       const file = e.target.files?.[0]
       if (!file) return
       try {
-        const data = await importData(file)
+        const raw = await importData(file)
+        const importMeta = raw?.__importMeta || null
+        const { __importMeta, ...rawClean } = raw && typeof raw === 'object' ? raw : {}
+        void __importMeta
+        let data = { ...rawClean }
+        let records = Array.isArray(data.records) ? [...data.records] : []
+        data = { ...data, records }
+
+        /*
+         * Import 후 coverUrl/thumbnailUrl 은 media://covers/... 이어야 함.
+         * 메인 IPC가 이미 추출·flush 했어도 잔여 Base64가 있으면 렌더러에서 재추출.
+         * 경량 records로 App State·메타·mrecord-data.json 을 즉시 교체한다.
+         */
+        const needsCoverMigration = records.some(
+          (r) => isBase64CoverUrl(r?.coverUrl) || isBase64CoverUrl(r?.thumbnailUrl)
+        )
+        if (needsCoverMigration) {
+          const { records: migratedRecords } = await migrateBase64RecordCovers(records, {
+            onBatchComplete: async ({ records: batchRecords }) => {
+              const partial = { ...data, records: batchRecords }
+              data = partial
+              try {
+                await flushAllPersistedData(partial, { force: true, bumpRevision: true })
+              } catch (flushErr) {
+                console.warn('Import cover migration batch flush failed:', flushErr)
+              }
+            }
+          })
+          records = migratedRecords
+          data = { ...data, records }
+        }
+
+        /* 경량 스냅샷을 디스크·메타에 강제 반영 (alreadyFlushed여도 최신 media:// 경로 보장) */
+        if (importMeta?.alreadyFlushed === true && !needsCoverMigration) {
+          saveData(data)
+        } else {
+          await flushAllPersistedData(data, { force: true, bumpRevision: true })
+        }
+
+        /* React state + heavy 스토어를 Base64 제거된 records로 즉시 교체 */
         dispatch({
           type: 'INIT',
           payload: {
@@ -310,6 +359,12 @@ export default function SettingsPanel() {
             preserveEasterEggDismissed: true
           }
         })
+
+        /*
+         * INIT 직후 stateRef는 동기 갱신됨 — 감상 등 heavy 병합 저장.
+         * coverUrl은 media:// 이므로 JSON 용량이 다시 불어나지 않음.
+         * save-persistent-data 쪽 Fallback sanitization이 최후 보루.
+         */
         await persistAll({ force: true })
         alert('백업 파일을 불러와 저장했습니다.')
       } catch (err) {
@@ -775,6 +830,15 @@ export default function SettingsPanel() {
                   {...noDragProps}
                 />
               </label>
+              <label className="flex items-center justify-between rounded-lg px-1 py-1.5 text-xs">
+                <span>잠금 내보내기 안내 다시 묻기</span>
+                <input
+                  type="checkbox"
+                  checked={settings.confirmLockExportWarning !== false}
+                  onChange={(e) => updateSettings({ confirmLockExportWarning: e.target.checked })}
+                  {...noDragProps}
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => setResetConfirmOpen(true)}
@@ -784,6 +848,9 @@ export default function SettingsPanel() {
                 데이터 초기화
               </button>
             </div>
+            <p className="mt-3 text-center text-[10px] text-[var(--color-text-muted)]">
+              v{packageJson.version}
+            </p>
           </div>
         </section>
       </div>

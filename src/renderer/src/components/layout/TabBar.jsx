@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowDownAZ,
@@ -25,6 +25,7 @@ import LockToggle from './LockToggle'
 import ViewModeToggle from './ViewModeToggle'
 import DecorateButton from '../decorate/DecorateButton'
 import { useDebouncedValue } from '../../hooks/useDebouncedValue'
+import { buildRecordListIndex } from '../../utils/recordFilters'
 import { searchRecordsWithReview } from '../../utils/searchRecords'
 import AnchoredPopup from '../ui/AnchoredPopup'
 import DeleteConfirmDialog from '../ui/DeleteConfirmDialog'
@@ -186,21 +187,30 @@ function FilterMenuContent() {
 
 function SearchMenuContent({ onClose }) {
   const { state, dispatch } = useApp()
+  const [, startTransition] = useTransition()
   const inputRef = useRef(null)
   const [query, setQuery] = useState(state.searchQuery || '')
-  const debouncedQuery = useDebouncedValue(query, 300)
+  const debouncedQuery = useDebouncedValue(query, 180)
+  const deferredQuery = useDeferredValue(debouncedQuery)
+
+  const listIndex = useMemo(
+    () => buildRecordListIndex(state.records),
+    [state.records]
+  )
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
   useEffect(() => {
-    dispatch({ type: 'SET_SEARCH', payload: debouncedQuery })
-  }, [debouncedQuery, dispatch])
+    startTransition(() => {
+      dispatch({ type: 'SET_SEARCH', payload: debouncedQuery })
+    })
+  }, [debouncedQuery, dispatch, startTransition])
 
   const results = useMemo(
-    () => searchRecordsWithReview(state.records, debouncedQuery),
-    [state.records, debouncedQuery]
+    () => searchRecordsWithReview(state.records, deferredQuery, 40, listIndex),
+    [state.records, deferredQuery, listIndex]
   )
 
   return (
@@ -221,7 +231,9 @@ function SearchMenuContent({ onClose }) {
             type="button"
             onClick={() => {
               setQuery('')
-              dispatch({ type: 'SET_SEARCH', payload: '' })
+              startTransition(() => {
+                dispatch({ type: 'SET_SEARCH', payload: '' })
+              })
             }}
             className="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           >
@@ -230,7 +242,7 @@ function SearchMenuContent({ onClose }) {
         )}
       </div>
       <div className="max-h-64 overflow-y-auto">
-        {query.trim() && results.length === 0 && (
+        {debouncedQuery.trim() && results.length === 0 && (
           <p className="px-2 py-4 text-center text-xs text-[var(--color-text-muted)]">
             검색 결과가 없습니다
           </p>
@@ -426,7 +438,9 @@ export default function TabBar() {
                   key={key}
                   type="button"
                   onClick={() => {
-                    dispatch({ type: 'SET_SORT', payload: { key, toggle: true } })
+                    startTransition(() => {
+                      dispatch({ type: 'SET_SORT', payload: { key, toggle: true } })
+                    })
                     setSortOpen(false)
                   }}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-black/[0.03] ${
