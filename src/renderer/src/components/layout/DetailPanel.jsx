@@ -243,7 +243,12 @@ export default function DetailPanel() {
     fullLayoutReviewHeight: layout.reviewHeight,
     fullLayoutReviewPercent: layout.reviewPercent ?? 80,
     onFullLayoutReviewHeightChange: (reviewHeight) => commitFullLayout({ reviewHeight }),
-    onFullLayoutReviewPercentChange: (reviewPercent) => commitFullLayout({ reviewPercent })
+    /* percent와 height를 원자적으로 저장 — 연속 dispatch 시 이전 percent로 snap-back 방지 */
+    onFullLayoutReviewPercentChange: (reviewPercent) =>
+      commitFullLayout({
+        reviewPercent,
+        reviewHeight: Math.round((reviewPercent / 100) * 800)
+      })
   }
 
   const panelStyle = isFull

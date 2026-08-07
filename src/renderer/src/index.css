@@ -37,11 +37,49 @@
   --bg-color: #faf8f3;
   --text-color: #745039;
   --border-color: #e8e2d6;
+  --border-width: 1px;
   --bg-color-rgb: 250, 248, 243;
   --panel-bg-rgb: 245, 241, 229;
   --subpanel-bg-rgb: 255, 255, 255;
   --font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-size: 14px;
+}
+
+/*
+ * 테두리 굵기 설정 (--border-width)
+ * 핸들바·스크롤바는 background로 그려지므로 여기 미적용
+ */
+.border {
+  border-width: var(--border-width) !important;
+}
+.border-t {
+  border-top-width: var(--border-width) !important;
+}
+.border-b {
+  border-bottom-width: var(--border-width) !important;
+}
+.border-l {
+  border-left-width: var(--border-width) !important;
+}
+.border-r {
+  border-right-width: var(--border-width) !important;
+}
+.border-x {
+  border-left-width: var(--border-width) !important;
+  border-right-width: var(--border-width) !important;
+}
+.border-y {
+  border-top-width: var(--border-width) !important;
+  border-bottom-width: var(--border-width) !important;
+}
+.divide-y > :not([hidden]) ~ :not([hidden]) {
+  border-top-width: var(--border-width) !important;
+}
+.divide-x > :not([hidden]) ~ :not([hidden]) {
+  border-left-width: var(--border-width) !important;
+}
+.border-0 {
+  border-width: 0 !important;
 }
 
 * {
@@ -108,7 +146,7 @@ input[type='color']::-webkit-color-swatch-wrapper {
 }
 
 input[type='color']::-webkit-color-swatch {
-  border: 2px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: 999px;
 }
 
@@ -295,7 +333,7 @@ html[data-ui-style='glass'] [data-tag-block] {
   background: rgba(var(--subpanel-bg-rgb), 0.55) !important;
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
-  border: 1px solid color-mix(in srgb, var(--border-color, var(--color-border)) 55%, transparent) !important;
+  border: var(--border-width) solid color-mix(in srgb, var(--border-color, var(--color-border)) 55%, transparent) !important;
   border-radius: 0.75rem !important;
   overflow: hidden !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
@@ -366,7 +404,7 @@ html[data-ui-style='glass'] [data-tab-bar] nav button {
 
 html[data-ui-style='glass'] [data-tab-bar] nav button:not([class*='bg-[var(--color-accent)]']) {
   background: rgba(var(--panel-bg-rgb), 0.55) !important;
-  border: 1px solid color-mix(in srgb, var(--border-color, var(--color-border)) 70%, transparent);
+  border: var(--border-width) solid color-mix(in srgb, var(--border-color, var(--color-border)) 70%, transparent);
 }
 
 html[data-ui-style='glass'] [data-tab-bar] [data-add-record] {
@@ -477,7 +515,7 @@ html[data-ui-style='retro'] [data-trace-dialog],
 html[data-ui-style='retro'] [data-export-review='true'],
 html[data-ui-style='retro'] [data-detail-panel] div.rounded-xl:has([data-export-review='true']) {
   border-radius: 0 !important;
-  border: 2px solid var(--border-color, var(--color-border)) !important;
+  border: var(--border-width) solid var(--border-color, var(--color-border)) !important;
   outline: none !important;
   box-shadow: 4px 4px 0 var(--border-color, var(--color-border)) !important;
 }
@@ -487,7 +525,7 @@ html[data-ui-style='retro'] [data-gallery-card-export],
 html[data-ui-style='retro'] [data-memo-card-export],
 html[data-ui-style='retro'] [data-tag-block] {
   border-radius: 0 !important;
-  border: 2px solid var(--border-color, var(--color-border)) !important;
+  border: var(--border-width) solid var(--border-color, var(--color-border)) !important;
   outline: none !important;
   overflow: hidden !important;
   box-shadow: 4px 4px 0 var(--border-color, var(--color-border)) !important;
@@ -502,7 +540,7 @@ html[data-ui-style='retro'] [data-memo-card-export]:hover {
 html[data-ui-style='retro'] [data-tab-bar] [data-add-record],
 html[data-ui-style='retro'] [data-tab-bar] nav button {
   border-radius: 0 !important;
-  border: 2px solid var(--border-color, var(--color-border)) !important;
+  border: var(--border-width) solid var(--border-color, var(--color-border)) !important;
   box-shadow: 4px 4px 0 var(--border-color, var(--color-border)) !important;
 }
 
@@ -671,7 +709,34 @@ html[data-ui-style='retro'] ::-webkit-scrollbar-thumb {
   box-shadow: none !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  border: 1px solid var(--border-color, var(--color-border)) !important;
+  border: var(--border-width) solid var(--border-color, var(--color-border)) !important;
+}
+
+/*
+ * 글래스 태그형 내보내기 전용 — 작품명 항목은 패널 단색만
+ * (카드 글래스/그림자/반투명이 항목에 섞여 html2canvas에 찍히는 것 차단)
+ */
+[data-tag-export-root][data-ui-style='glass'] [data-tag-record-item] {
+  background: var(--color-bg-panel) !important;
+  background-color: var(--color-bg-panel) !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  padding-top: 1px !important;
+  padding-bottom: 7px !important;
+  line-height: 1.35 !important;
+  transform: translateY(-3px);
+}
+
+[data-tag-export-root][data-ui-style='glass'] [data-tag-block-header] {
+  padding-top: 2px !important;
+}
+
+[data-tag-export-root][data-ui-style='glass'] [data-tag-block-title] {
+  padding-top: 0 !important;
+  transform: translateY(-3px);
 }
 
 [data-gallery-export-root][data-ui-style='glass'] [data-gallery-title-bar],
@@ -704,8 +769,40 @@ html[data-ui-style='retro'] ::-webkit-scrollbar-thumb {
 [data-memo-export-root][data-ui-style='default'] [data-memo-card-export] {
   background: var(--color-bg-card) !important;
   background-color: var(--color-bg-card) !important;
-  border: 1px solid var(--color-border) !important;
+  border: var(--border-width) solid var(--color-border) !important;
   box-shadow: none !important;
+}
+
+/*
+ * 기본 모드 태그형 내보내기 전용
+ * — 카드 내부: 서브패널 단색 / 작품명 항목: 패널 단색
+ * — shadow-sm·투명 스크롤이 html2canvas에 비치는 것 차단
+ */
+[data-tag-export-root][data-ui-style='default'] [data-tag-block] {
+  background: var(--color-bg-sub-panel) !important;
+  background-color: var(--color-bg-sub-panel) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+[data-tag-export-root][data-ui-style='default'] [data-tag-block-scroll] {
+  background: var(--color-bg-sub-panel) !important;
+  background-color: var(--color-bg-sub-panel) !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  box-shadow: none !important;
+}
+
+[data-tag-export-root][data-ui-style='default'] [data-tag-record-item] {
+  background: var(--color-bg-panel) !important;
+  background-color: var(--color-bg-panel) !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  overflow: hidden !important;
 }
 
 [data-gallery-export-root][data-ui-style='default'] [data-gallery-title-bar],

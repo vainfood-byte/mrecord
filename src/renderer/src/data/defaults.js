@@ -275,6 +275,8 @@ export const DEFAULT_SETTINGS = {
   customFont: null,
   fontSize: 14,
   uiScale: 100,
+  /** 테마 테두리 굵기 (px) — 0=없음 ~ 5, 핸들바·스크롤바 제외 */
+  borderWidth: 1,
   tagCustomColors: {
     'custom-1': '#E8D6FF',
     'custom-2': '#D6FFF0'
@@ -467,4 +469,6 @@ export function applyTheme(settings) {
   root.style.setProperty('--font-family', fontFamily)
   root.style.setProperty('--font-size', `${settings.fontSize}px`)
   root.style.setProperty('--ui-scale', String((settings.uiScale ?? 100) / 100))
+  const borderWidth = Math.min(5, Math.max(0, Number(settings.borderWidth ?? 1)))
+  root.style.setProperty('--border-width', `${Number.isFinite(borderWidth) ? borderWidth : 1}px`)
 }

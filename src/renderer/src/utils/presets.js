@@ -31,6 +31,7 @@ export const PRESET_SETTING_FIELDS = [
   'customFont',
   'fontSize',
   'uiScale',
+  'borderWidth',
   'backgroundImage',
   'backgroundImageOpacity',
   'backgroundImageMode',

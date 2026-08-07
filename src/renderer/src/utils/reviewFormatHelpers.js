@@ -153,3 +153,69 @@ export function applyEditorFontFamily(editor, fontStack) {
   sel.removeAllRanges()
   sel.addRange(next)
 }
+
+function stripBackgroundFromFragment(fragment) {
+  fragment.querySelectorAll('[style]').forEach((el) => {
+    el.style.background = ''
+    el.style.backgroundColor = ''
+    el.style.removeProperty('background')
+    el.style.removeProperty('background-color')
+  })
+  fragment.querySelectorAll('mark').forEach((mark) => {
+    mark.style.background = ''
+    mark.style.backgroundColor = ''
+  })
+}
+
+function applyBackgroundDeep(root, color) {
+  if (!root) return
+  const walk = (node) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    if (node.tagName === 'IMG') return
+    node.style.backgroundColor = color
+    node.style.boxDecorationBreak = 'clone'
+    node.style.webkitBoxDecorationBreak = 'clone'
+    node.childNodes.forEach(walk)
+  }
+  walk(root)
+}
+
+/** contentEditable 본문 — 선택 영역 텍스트 배경색 (글자크기/글꼴과 동일하게 span 적용) */
+export function applyEditorBackgroundColor(editor, color) {
+  if (!editor || !color) return
+
+  editor.focus()
+  const sel = window.getSelection()
+  if (!sel?.rangeCount) return
+
+  const range = sel.getRangeAt(0)
+  if (!editor.contains(range.commonAncestorContainer)) return
+
+  if (sel.isCollapsed) {
+    try {
+      document.execCommand('styleWithCSS', false, true)
+      if (!document.execCommand('hiliteColor', false, color)) {
+        document.execCommand('backColor', false, color)
+      }
+    } catch {
+      /* ignore */
+    }
+    return
+  }
+
+  const extracted = range.extractContents()
+  stripBackgroundFromFragment(extracted)
+
+  const span = document.createElement('span')
+  span.style.backgroundColor = color
+  span.style.boxDecorationBreak = 'clone'
+  span.style.webkitBoxDecorationBreak = 'clone'
+  span.appendChild(extracted)
+  applyBackgroundDeep(span, color)
+  range.insertNode(span)
+
+  const next = document.createRange()
+  next.selectNodeContents(span)
+  sel.removeAllRanges()
+  sel.addRange(next)
+}

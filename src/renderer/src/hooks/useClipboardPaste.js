@@ -116,8 +116,13 @@ export function useVerticalResize(initialHeight, { onMove, onCommit }, min = 60,
   return startResize
 }
 
-/** 범용 드래그 리사이즈 — axis: 'x' | 'y' */
-export function useDragResize(initialValue, { axis = 'y', onMove, onCommit, min = 80, max = 800, invert = false }) {
+/** 범용 드래그 리사이즈 — axis: 'x' | 'y'
+ * getContainerSize가 있으면 delta(px)를 컨테이너 크기 대비 %로 변환한다.
+ */
+export function useDragResize(
+  initialValue,
+  { axis = 'y', onMove, onCommit, min = 80, max = 800, invert = false, getContainerSize } = {}
+) {
   const startResize = useCallback(
     (e) => {
       e.preventDefault()
@@ -125,6 +130,7 @@ export function useDragResize(initialValue, { axis = 'y', onMove, onCommit, min 
       const startValue = initialValue
       let lastValue = startValue
       let ended = false
+      const containerSize = typeof getContainerSize === 'function' ? getContainerSize() : 0
 
       const endDrag = () => {
         if (ended) return
@@ -138,7 +144,8 @@ export function useDragResize(initialValue, { axis = 'y', onMove, onCommit, min 
 
       const onMouseMove = (ev) => {
         const current = axis === 'x' ? ev.clientX : ev.clientY
-        const delta = current - startPos
+        const deltaPx = current - startPos
+        const delta = containerSize > 0 ? (deltaPx / containerSize) * 100 : deltaPx
         const next = invert ? startValue - delta : startValue + delta
         lastValue = Math.min(max, Math.max(min, next))
         onMove?.(lastValue)
@@ -152,7 +159,7 @@ export function useDragResize(initialValue, { axis = 'y', onMove, onCommit, min 
       document.addEventListener('mouseup', onMouseUp)
       window.addEventListener('blur', endDrag)
     },
-    [initialValue, axis, onMove, onCommit, min, max, invert]
+    [initialValue, axis, onMove, onCommit, min, max, invert, getContainerSize]
   )
 
   return startResize

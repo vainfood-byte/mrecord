@@ -1,6 +1,6 @@
 {
   "name": "mrecord",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "My Record (마이리코드) - 콘텐츠 기록 프로그램",
   "main": "./out/main/index.js",
   "repository": {

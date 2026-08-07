@@ -11,8 +11,6 @@ import { exportFullRecord, buildSeriesReviewSections } from '../../utils/exportF
 import { resolveFontFamily } from '../../data/defaults'
 import { getThemeColors } from '../../utils/colorUtils'
 import EditableTitle from '../ui/EditableTitle'
-import ResizeHandle from '../ui/ResizeHandle'
-import { useDragResize } from '../../hooks/useClipboardPaste'
 import { createReviewContentSaver } from '../../utils/reviewContentSaver'
 import { FLUSH_PENDING_SAVES_EVENT } from '../../utils/storage'
 import { insertTextAtCursor as insertTextIntoEditor } from '../../utils/insertTextAtCursor'
@@ -161,11 +159,7 @@ function ReviewEditor({
   compact = false,
   fullLayout = false,
   propertyFields,
-  minBodyHeight,
-  fullLayoutReviewHeight = 480,
-  fullLayoutReviewPercent = 80,
-  onFullLayoutReviewHeightChange,
-  onFullLayoutReviewPercentChange
+  minBodyHeight
 }) {
   const { state, dispatch } = useApp()
   const record = useSelectedRecord()
@@ -202,30 +196,14 @@ function ReviewEditor({
   const [cropSrc, setCropSrc] = useState(null)
   const [quoteMenu, setQuoteMenu] = useState(null)
   const [charMenu, setCharMenu] = useState(null)
-  const [liveReviewHeight, setLiveReviewHeight] = useState(null)
   /** 본문 파일 드래그 오버 하이라이트 (편집 모드 전용) */
   const [bodyDragOver, setBodyDragOver] = useState(false)
   const bodyDragDepthRef = useRef(0)
   isEditingRef.current = isEditing
-  const resizable = Boolean(onFullLayoutReviewHeightChange || onFullLayoutReviewPercentChange)
-  const reviewHeight = liveReviewHeight ?? fullLayoutReviewHeight
-  const reviewPercent = fullLayoutReviewPercent ?? 80
-  const activeReviewPercent = liveReviewHeight ?? reviewPercent
-  const activeEditPercent = 100 - activeReviewPercent
-  /** 편집 모드일 때만 편집박스·리사이즈 분할 표시 */
+  /** 본문이 잔여 높이를 flex로 채우는 레이아웃 (full / compact 공통) */
+  const fillLayout = fullLayout || compact
+  /** 편집 모드일 때만 편집박스 표시 */
   const showEditPane = isEditing
-
-  const startReviewResize = useDragResize(reviewPercent, {
-    axis: 'y',
-    min: 50,
-    max: 90,
-    onMove: setLiveReviewHeight,
-    onCommit: (pct) => {
-      onFullLayoutReviewPercentChange?.(pct)
-      onFullLayoutReviewHeightChange?.(Math.round((pct / 100) * 800))
-      setLiveReviewHeight(null)
-    }
-  })
 
   const series = record?.series || { enabled: false, unit: '권', volumes: [1] }
   const vol = state.selectedVolume
@@ -330,13 +308,21 @@ function ReviewEditor({
     }
   }, [])
 
-  /** 편집 중 포맷/이미지 조작만 디바운스 저장 — 타이핑은 수동 저장(또는 회차 전환 flush) */
+  /**
+   * 편집 중 본문은 draft만 갱신 — [저장] 전에는 records에 커밋하지 않음.
+   * (포맷/이미지 DOM 변경은 에디터에 유지, 미저장 이탈 시 원본 유지)
+   */
   const scheduleContentSave = useCallback(() => {
     if (!isEditingRef.current) return
-    contentSaverRef.current?.schedule()
+    draftHtmlRef.current = editorRef.current?.innerHTML || draftHtmlRef.current
+    contentSaverRef.current?.cancel()
   }, [])
 
   const flushContentSave = useCallback(() => {
+    if (isEditingRef.current) {
+      contentSaverRef.current?.cancel()
+      return
+    }
     contentSaverRef.current?.flush()
   }, [])
 
@@ -346,8 +332,13 @@ function ReviewEditor({
     saveReviewRef.current?.({ subtitle: next })
   }, [])
 
+  /** 편집 중 이탈(닫기/언마운트/FLUSH) 시 본문 자동 커밋 차단 */
   const flushPendingReviewSaves = useCallback(() => {
-    contentSaverRef.current?.flush()
+    if (isEditingRef.current) {
+      contentSaverRef.current?.cancel()
+    } else {
+      contentSaverRef.current?.flush()
+    }
     flushSubtitleSave()
   }, [flushSubtitleSave])
 
@@ -578,15 +569,21 @@ function ReviewEditor({
     const key = `${record.id}-${vol ?? 'all'}`
     if (contentKeyRef.current === key) return
 
-    // 이전 회차/작품 감상을 바인딩된 대상에 먼저 저장 (recordRef가 바뀌어도 target id로 저장)
+    // 이전 회차/작품: 편집 중이면 본문 자동 커밋하지 않고 원본 유지
     const prevTarget = activeTargetRef.current
-    contentSaverRef.current?.flush()
+    const wasEditing = isEditingRef.current
+    if (wasEditing) {
+      contentSaverRef.current?.cancel()
+    } else {
+      contentSaverRef.current?.flush()
+    }
     if (prevTarget.recordId) {
       saveReviewToTarget({ subtitle: subtitleLiveRef.current ?? '' }, prevTarget)
     }
 
     // flush 완료 후: 본문에 없는 편집박스 임시 blob URL만 해제 (저장된 본문 이미지는 유지)
-    if (contentKeyRef.current) {
+    // 편집 중 미저장 이탈(discard) 시에는 draft 기준으로 revoke하지 않음
+    if (contentKeyRef.current && !wasEditing) {
       const flushedHtml = editorRef.current?.innerHTML || ''
       for (const src of stableChapterImagesRef.current || []) {
         if (
@@ -643,6 +640,19 @@ function ReviewEditor({
       return root === editor || editor.contains(root)
     }
 
+    /** 텍스트가 포함된 선택만 따옴표 메뉴 대상 (이미지 단독·공백-only 제외) */
+    const rangeHasQuotableText = (range) => {
+      if (!range || range.collapsed) return false
+      const raw = String(range.toString() || '').replace(/\u200B/g, '')
+      if (!raw.trim()) return false
+      const frag = range.cloneContents()
+      const tmp = document.createElement('div')
+      tmp.appendChild(frag)
+      tmp.querySelectorAll('img').forEach((img) => img.remove())
+      const text = String(tmp.textContent || '').replace(/\u200B/g, '').trim()
+      return Boolean(text)
+    }
+
     const captureSelection = () => {
       const sel = window.getSelection()
       if (!sel || sel.rangeCount < 1 || sel.isCollapsed) {
@@ -650,7 +660,7 @@ function ReviewEditor({
         return
       }
       const range = sel.getRangeAt(0)
-      if (!rangeInEditor(range) || !range.toString()) {
+      if (!rangeInEditor(range) || !rangeHasQuotableText(range)) {
         savedRangeRef.current = null
         return
       }
@@ -663,16 +673,26 @@ function ReviewEditor({
       e.preventDefault()
       e.stopPropagation()
 
+      const imgTarget = e.target?.closest?.('img')
       captureSelection()
       const sel = window.getSelection()
       let range = null
       if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
         const live = sel.getRangeAt(0)
-        if (rangeInEditor(live) && live.toString()) range = live.cloneRange()
+        if (rangeInEditor(live) && rangeHasQuotableText(live)) range = live.cloneRange()
       }
-      if (!range && savedRangeRef.current) range = savedRangeRef.current.cloneRange()
+      if (!range && savedRangeRef.current && rangeHasQuotableText(savedRangeRef.current)) {
+        range = savedRangeRef.current.cloneRange()
+      }
 
-      if (range && !range.collapsed && range.toString()) {
+      // 이미지 단독 선택/우클릭: 따옴표 메뉴 비노출
+      if (imgTarget && editor.contains(imgTarget) && !rangeHasQuotableText(range)) {
+        setCharMenu({ x: e.clientX, y: e.clientY })
+        setQuoteMenu(null)
+        return
+      }
+
+      if (range && rangeHasQuotableText(range)) {
         setQuoteMenu({
           x: e.clientX,
           y: e.clientY,
@@ -764,7 +784,9 @@ function ReviewEditor({
 
   const enterEditMode = () => {
     ensureActiveTargetBound()
-    draftHtmlRef.current = editorRef.current?.innerHTML || current.content || ''
+    const html = editorRef.current?.innerHTML || current.content || ''
+    draftHtmlRef.current = html
+    contentSaverRef.current?.reset(html)
     setIsEditing(true)
     requestAnimationFrame(() => {
       const el = editorRef.current
@@ -921,16 +943,17 @@ function ReviewEditor({
 
   return (
     <div
-      className={`flex min-w-0 flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] ${
-        fullLayout || resizable ? 'h-full min-h-0 flex-1' : compact ? '' : 'h-full'
+      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] ${
+        fillLayout ? 'h-full min-h-0 flex-1' : 'h-full'
       }`}
     >
       <div
-        className={fullLayout || resizable ? 'flex min-h-0 flex-col' : 'contents'}
+        className={fillLayout ? 'flex min-h-0 flex-1 flex-col' : 'contents'}
         style={
-          fullLayout || resizable
+          fillLayout
             ? {
-                flex: showEditPane ? `${activeReviewPercent} 1 0%` : '1 1 0%',
+                /* 본문이 잔여 높이를 모두 흡수 → EditBox는 shrink-0로 하단 밀착 */
+                flex: '1 1 0%',
                 minHeight: 0
               }
             : undefined
@@ -1010,13 +1033,10 @@ function ReviewEditor({
       </div>
 
       <div
-        className={`relative ${
-          fullLayout || resizable
-            ? 'min-h-0 flex-1'
-            : compact && minBodyHeight
-              ? 'flex-1'
-              : 'min-h-[180px] flex-1'
+        className={`relative min-h-0 flex-1 ${
+          fillLayout || (compact && minBodyHeight) ? '' : 'min-h-[180px]'
         }`}
+        style={fillLayout ? { flex: '1 1 0%', minHeight: 0 } : undefined}
       >
         <div
           ref={editorRef}
@@ -1032,20 +1052,20 @@ function ReviewEditor({
           onDragLeave={handleBodyDragLeave}
           onDragOver={handleBodyDragOver}
           onDrop={handleDrop}
-          className={`h-full leading-relaxed outline-none transition-[box-shadow] duration-150 ${
+          className={`h-full min-h-0 leading-relaxed outline-none transition-[box-shadow] duration-150 ${
             isEditing ? '' : 'cursor-default select-text'
           } ${
             bodyDragOver && isEditing
               ? 'shadow-[inset_0_0_0_2px_var(--color-accent)]'
               : ''
           } ${
-            fullLayout || resizable || (compact && minBodyHeight)
+            fillLayout || (compact && minBodyHeight)
               ? 'overflow-y-auto p-4'
               : 'min-h-[180px] overflow-y-auto p-4'
           }`}
           style={{
             WebkitAppRegion: 'no-drag',
-            ...(compact && minBodyHeight && !fullLayout && !resizable
+            ...(compact && minBodyHeight && !fillLayout
               ? { minHeight: minBodyHeight }
               : null)
           }}
@@ -1068,23 +1088,8 @@ function ReviewEditor({
       </div>
       </div>
 
-      {showEditPane && resizable && (
-        <ResizeHandle direction="horizontal" onMouseDown={startReviewResize} className="py-1" />
-      )}
-
       {showEditPane && (
-        <div
-          className={
-            fullLayout || resizable
-              ? 'flex min-h-0 flex-col overflow-hidden'
-              : ''
-          }
-          style={
-            fullLayout || resizable
-              ? { flex: `${activeEditPercent} 1 0%`, minHeight: 0 }
-              : undefined
-          }
-        >
+        <div className="flex shrink-0 flex-col overflow-hidden">
           <EditBox
             images={current.images || []}
             onImagesChange={(imgs) => saveReview({ images: imgs })}
@@ -1092,7 +1097,7 @@ function ReviewEditor({
             onContentChange={scheduleContentSave}
             collapsed={editBoxCollapsed}
             onToggleCollapse={() => setEditBoxCollapsed(!editBoxCollapsed)}
-            docked={fullLayout || resizable}
+            docked={fillLayout}
             editing={isEditing}
             pruneEpoch={pruneEpoch}
             chapterKey={chapterKey}
@@ -1121,7 +1126,7 @@ function ReviewEditor({
         />
       )}
 
-      {showEditPane && !fullLayout && !resizable && (
+      {showEditPane && !fillLayout && (
         <div className="border-t border-[var(--color-border)] px-3 py-1.5 text-[10px] text-[var(--color-text-muted)]">
           <ImageIcon size={10} className="mr-1 inline" />
           Ctrl+V · 편집 박스는 내보내기 제외

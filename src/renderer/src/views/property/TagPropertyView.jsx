@@ -127,7 +127,7 @@ function TagBlock({
       </div>
 
       <div className="flex min-h-[120px] flex-1 flex-col p-2">
-        <div className="flex min-h-[108px] flex-1 flex-col overflow-y-auto rounded-lg bg-[var(--color-bg-card)] p-2" data-tag-block-scroll>
+        <div className="flex min-h-[108px] flex-1 flex-col overflow-y-auto rounded-lg bg-transparent p-2" data-tag-block-scroll>
           {records.length === 0 ? (
             <p className="flex flex-1 items-center justify-center px-1 py-4 text-center text-xs text-[var(--color-text-muted)]">
               작품 없음
@@ -217,6 +217,13 @@ export default function TagPropertyView({ field }) {
 
   return (
     <>
+      <span
+        data-export-hide
+        className="mb-2 block text-xs text-[var(--color-text-muted)]"
+        style={{ WebkitAppRegion: 'no-drag' }}
+      >
+        ※ 태그형 속성 카드에서는 작품명 텍스트 크기 변경을 지원하지 않습니다.
+      </span>
       <div className="flex flex-col" style={{ minHeight: blockMinHeight }} data-tag-export-root>
         <div
           data-tag-block-grid

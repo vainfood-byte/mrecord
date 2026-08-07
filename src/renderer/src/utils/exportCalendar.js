@@ -4478,6 +4478,54 @@ function findClonedExportRoot(clonedDoc, sourceEl) {
   )
 }
 
+function resolveExportPanelBgColor() {
+  const panel = getThemeColors()?.bgPanel || '#F5F1E5'
+  return toSafeCssColor(panel, 'backgroundColor') || panel || '#F5F1E5'
+}
+
+function resolveExportSubPanelBgColor() {
+  const sub = getThemeColors()?.bgSubPanel || '#FFFFFF'
+  return toSafeCssColor(sub, 'backgroundColor') || sub || '#FFFFFF'
+}
+
+/** 기본 모드 태그형 — 카드 내부 서브패널 단색 + 작품명 패널 단색 */
+function applyDefaultTagBlockExportColors(block, saved) {
+  if (!block) return
+  const subPanelBg = resolveExportSubPanelBgColor()
+  const panelBg = resolveExportPanelBgColor()
+
+  if (saved) saveTagBlockExportStyle(block, saved)
+  block.style.setProperty('background', 'none', 'important')
+  block.style.setProperty('background-image', 'none', 'important')
+  block.style.setProperty('background-color', subPanelBg, 'important')
+  block.style.setProperty('opacity', '1', 'important')
+  block.style.setProperty('box-shadow', 'none', 'important')
+  block.style.setProperty('-webkit-backdrop-filter', 'none', 'important')
+  block.style.setProperty('backdrop-filter', 'none', 'important')
+
+  const scroll = block.querySelector('[data-tag-block-scroll]')
+  if (scroll) {
+    if (saved) saveTagBlockExportStyle(scroll, saved)
+    scroll.style.setProperty('background', 'none', 'important')
+    scroll.style.setProperty('background-image', 'none', 'important')
+    scroll.style.setProperty('background-color', subPanelBg, 'important')
+    scroll.style.setProperty('opacity', '1', 'important')
+    scroll.style.setProperty('box-shadow', 'none', 'important')
+  }
+
+  block.querySelectorAll('[data-tag-record-item]').forEach((item) => {
+    if (saved) saveTagBlockExportStyle(item, saved)
+    item.style.setProperty('background', 'none', 'important')
+    item.style.setProperty('background-image', 'none', 'important')
+    item.style.setProperty('background-color', panelBg, 'important')
+    item.style.setProperty('opacity', '1', 'important')
+    item.style.setProperty('overflow', 'hidden', 'important')
+    item.style.setProperty('box-shadow', 'none', 'important')
+    item.style.setProperty('-webkit-backdrop-filter', 'none', 'important')
+    item.style.setProperty('backdrop-filter', 'none', 'important')
+  })
+}
+
 function saveTagBlockExportStyle(el, saved, extra = {}) {
   saved.nodes.push({
     el,
@@ -4493,8 +4541,34 @@ function saveTagBlockExportStyle(el, saved, extra = {}) {
     margin: el.style.margin,
     transform: el.style.transform,
     boxSizing: el.style.boxSizing,
+    backgroundColor: el.style.backgroundColor,
+    backgroundImage: el.style.backgroundImage,
+    opacity: el.style.opacity,
+    overflow: el.style.overflow,
+    boxShadow: el.style.boxShadow,
+    backdropFilter: el.style.backdropFilter,
+    webkitBackdropFilter: el.style.webkitBackdropFilter,
     ...extra
   })
+}
+
+/** 글래스 태그형 내보내기 — 작품명 항목을 패널 단색으로 고정 + 텍스트 위로 보정 */
+function applyGlassTagRecordItemExportStyle(item) {
+  if (!item) return
+  const panelBg = resolveExportPanelBgColor()
+  item.style.setProperty('background', 'none', 'important')
+  item.style.setProperty('background-image', 'none', 'important')
+  item.style.setProperty('background-color', panelBg, 'important')
+  item.style.setProperty('opacity', '1', 'important')
+  item.style.setProperty('overflow', 'hidden', 'important')
+  item.style.setProperty('box-shadow', 'none', 'important')
+  item.style.setProperty('-webkit-backdrop-filter', 'none', 'important')
+  item.style.setProperty('backdrop-filter', 'none', 'important')
+  /* html2canvas 텍스트 하단 쏠림 — 패딩 비대칭으로 최소 3px 위로 */
+  item.style.setProperty('padding-top', '1px', 'important')
+  item.style.setProperty('padding-bottom', '7px', 'important')
+  item.style.setProperty('line-height', '1.35', 'important')
+  item.style.setProperty('transform', 'translateY(-3px)', 'important')
 }
 
 function applyTagBlockTextExportFix(sourceEl, targetEl, { offsetY = 0, lineHeight = '1.4' } = {}) {
@@ -4565,69 +4639,66 @@ function fixTagBlockExportLayout(sourceBlock, cloneBlock) {
     const cloneTitle = cloneHeader.querySelector('[data-tag-block-title]')
     applyTagExportHeaderNoClip(cloneHeader, null, null)
     if (sourceTitle && cloneTitle) {
-      applyTagBlockTextExportFix(sourceTitle, cloneTitle, { offsetY: 0, lineHeight: '1.4' })
+      /* 글래스: 태그명 텍스트를 최소 3px 위로 */
+      applyTagBlockTextExportFix(sourceTitle, cloneTitle, {
+        offsetY: getLiveUiStyle() === 'glass' ? -3 : 0,
+        lineHeight: '1.4'
+      })
+      if (getLiveUiStyle() === 'glass') {
+        cloneHeader.style.setProperty('padding-top', '2px', 'important')
+        cloneTitle.style.setProperty('padding-top', '0', 'important')
+        cloneTitle.style.setProperty('transform', 'translateY(-3px)', 'important')
+      }
     }
   }
 
-  const sourceItems = [...sourceBlock.querySelectorAll('[data-tag-record-item]')]
-  const cloneItems = [...cloneBlock.querySelectorAll('[data-tag-record-item]')]
-  sourceItems.forEach((sourceItem, index) => {
-    const cloneItem = cloneItems[index]
-    if (!cloneItem) return
-    const itemRect = sourceItem.getBoundingClientRect()
-    const itemH = Math.max(Math.ceil(itemRect.height), 1)
-    cloneItem.style.display = 'flex'
-    cloneItem.style.alignItems = 'center'
-    cloneItem.style.boxSizing = 'border-box'
-    cloneItem.style.height = `${itemH}px`
-    cloneItem.style.minHeight = `${itemH}px`
-    cloneItem.style.maxHeight = `${itemH}px`
-    cloneItem.style.lineHeight = '1.35'
-    cloneItem.style.paddingTop = '0'
-    cloneItem.style.paddingBottom = '0'
-    cloneItem.style.margin = '0'
-    cloneItem.style.setProperty('padding-left', '0', 'important')
-    cloneItem.style.setProperty('margin-left', '0', 'important')
-    cloneItem.style.setProperty('list-style', 'none', 'important')
-    cloneItem.style.transform = 'none'
-    cloneItem.style.whiteSpace = 'nowrap'
-    cloneItem.style.overflow = 'hidden'
-    cloneItem.style.textOverflow = 'ellipsis'
-  })
+  const uiStyle = getLiveUiStyle()
+  if (uiStyle === 'glass') {
+    cloneBlock.querySelectorAll('[data-tag-record-item]').forEach((cloneItem) => {
+      applyGlassTagRecordItemExportStyle(cloneItem)
+    })
+  } else if (uiStyle === 'default') {
+    applyDefaultTagBlockExportColors(cloneBlock, null)
+  }
 }
 
 function prepareTagBlockExportLayout(element, saved) {
   stripTagExportListBullets(element)
+  const uiStyle = getLiveUiStyle()
+  const isGlass = uiStyle === 'glass'
+  const isDefault = uiStyle === 'default'
 
   element.querySelectorAll('[data-tag-block]').forEach((block) => {
+    if (isDefault) {
+      applyDefaultTagBlockExportColors(block, saved)
+      const header = block.querySelector('[data-tag-block-header]')
+      if (header) {
+        const title = header.querySelector('[data-tag-block-title]')
+        applyTagExportHeaderNoClip(header, title, saved)
+      }
+      return
+    }
+
     const header = block.querySelector('[data-tag-block-header]')
     if (header) {
       const title = header.querySelector('[data-tag-block-title]')
       applyTagExportHeaderNoClip(header, title, saved)
+      if (isGlass && title) {
+        header.style.setProperty('padding-top', '2px', 'important')
+        title.style.setProperty('padding-top', '0', 'important')
+        title.style.setProperty('transform', 'translateY(-3px)', 'important')
+      }
     }
 
     block.querySelectorAll('[data-tag-record-item]').forEach((item) => {
-      const itemRect = item.getBoundingClientRect()
-      const itemH = Math.max(Math.ceil(itemRect.height), 1)
       saveTagBlockExportStyle(item, saved)
-      item.style.display = 'flex'
-      item.style.alignItems = 'center'
-      item.style.boxSizing = 'border-box'
-      item.style.height = `${itemH}px`
-      item.style.minHeight = `${itemH}px`
-      item.style.maxHeight = `${itemH}px`
-      item.style.lineHeight = '1.35'
-      item.style.paddingTop = '0'
-      item.style.paddingBottom = '0'
-      item.style.margin = '0'
-      item.style.setProperty('padding-left', '0', 'important')
-      item.style.setProperty('margin-left', '0', 'important')
-      item.style.setProperty('list-style', 'none', 'important')
-      item.style.setProperty('list-style-type', 'none', 'important')
-      item.style.transform = 'none'
-      item.style.whiteSpace = 'nowrap'
-      item.style.overflow = 'hidden'
-      item.style.textOverflow = 'ellipsis'
+      if (isGlass) {
+        applyGlassTagRecordItemExportStyle(item)
+      } else {
+        item.style.backgroundColor = 'var(--color-bg-panel)'
+        item.style.opacity = '1'
+        item.style.overflow = 'hidden'
+      }
     })
   })
 }
@@ -4640,6 +4711,24 @@ function fixTagBlockExportClone(sourceRoot, clonedRoot) {
     const cloneBlock = cloneBlocks[index]
     fixTagBlockExportLayout(sourceBlock, cloneBlock)
     syncExportCardUiChrome(sourceBlock, cloneBlock)
+  })
+}
+
+/** html2canvas 태그형 카드 텍스트 수직 쏠림 — 클론 DOM 전용 보정 */
+function nudgeTagExportTextInClone(clonedRoot) {
+  if (!clonedRoot) return
+  const doc = clonedRoot.ownerDocument || document
+  clonedRoot.querySelectorAll('[data-tag-record-item]').forEach((item) => {
+    const textNodes = [...item.childNodes].filter(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent
+    )
+    textNodes.forEach((node) => {
+      const span = doc.createElement('span')
+      span.style.display = 'inline-block'
+      span.style.transform = 'translateY(-3px)'
+      span.textContent = node.textContent
+      item.replaceChild(span, node)
+    })
   })
 }
 
@@ -4662,8 +4751,10 @@ function prepareGenericViewExport(element) {
   const isRecordSplit =
     element.hasAttribute('data-record-export-root') &&
     element.dataset.recordSplitExport === '1'
+  const isTagExport = element.hasAttribute('data-tag-export-root')
 
-  if (!isRecordSplit) {
+  /* 태그형은 height:auto !important 경로로 전체 높이 확보 — 일반 expand와 중복 방지 */
+  if (!isRecordSplit && !isTagExport) {
     const expand = (el) => {
       saved.nodes.push({
         el,
@@ -4709,15 +4800,21 @@ function prepareGenericViewExport(element) {
     expandScrollAncestors(element, saved)
   }
 
-  if (element.hasAttribute('data-tag-export-root')) {
+  if (isTagExport) {
     element.querySelectorAll('[data-export-hide]').forEach((el) => {
       saved.nodes.push({ el, display: el.style.display })
       el.style.display = 'none'
     })
     expandScrollAncestors(element, saved)
     element.style.width = `${Math.max(element.scrollWidth, element.offsetWidth)}px`
-    prepareTagBlockExportLayout(element, saved)
-    element.querySelectorAll('[data-tag-block-scroll]').forEach((el) => {
+    /* 글래스/기본 태그형만 단색·보정 (레트로·타 탭 미적용) */
+    {
+      const tagUi = getLiveUiStyle()
+      if (tagUi === 'glass' || tagUi === 'default') {
+        prepareTagBlockExportLayout(element, saved)
+      }
+    }
+    const injectTagCaptureExpand = (el) => {
       saved.nodes.push({
         el,
         height: el.style.height,
@@ -4725,11 +4822,13 @@ function prepareGenericViewExport(element) {
         overflow: el.style.overflow,
         overflowY: el.style.overflowY
       })
-      el.style.height = `${Math.max(el.scrollHeight, el.offsetHeight)}px`
+      el.style.setProperty('overflow', 'visible', 'important')
+      el.style.setProperty('height', 'auto', 'important')
       el.style.maxHeight = 'none'
-      el.style.overflow = 'visible'
       el.style.overflowY = 'visible'
-    })
+    }
+    injectTagCaptureExpand(element)
+    element.querySelectorAll('[data-tag-block-scroll]').forEach(injectTagCaptureExpand)
   }
 
   return saved
@@ -4759,7 +4858,13 @@ function restoreGenericViewExport(saved) {
       alignItems,
       justifyContent,
       boxSizing,
-      minHeight
+      minHeight,
+      backgroundColor,
+      backgroundImage,
+      opacity,
+      boxShadow,
+      backdropFilter,
+      webkitBackdropFilter
     }) => {
       if (!el) return
       if (height !== undefined) {
@@ -4781,7 +4886,10 @@ function restoreGenericViewExport(saved) {
       if (containIntrinsicSize !== undefined) el.style.containIntrinsicSize = containIntrinsicSize
       if (display !== undefined) el.style.display = display
       if (scrollTop !== undefined) el.scrollTop = scrollTop
-      if (transform !== undefined) el.style.transform = transform
+      if (transform !== undefined) {
+        el.style.removeProperty('transform')
+        el.style.transform = transform
+      }
       if (lineHeight !== undefined) {
         el.style.removeProperty('line-height')
         el.style.lineHeight = lineHeight
@@ -4790,11 +4898,39 @@ function restoreGenericViewExport(saved) {
         el.style.removeProperty('padding-top')
         el.style.paddingTop = paddingTop
       }
-      if (paddingBottom !== undefined) el.style.paddingBottom = paddingBottom
+      if (paddingBottom !== undefined) {
+        el.style.removeProperty('padding-bottom')
+        el.style.paddingBottom = paddingBottom
+      }
       if (margin !== undefined) el.style.margin = margin
       if (alignItems !== undefined) el.style.alignItems = alignItems
       if (justifyContent !== undefined) el.style.justifyContent = justifyContent
       if (boxSizing !== undefined) el.style.boxSizing = boxSizing
+      if (backgroundColor !== undefined) {
+        el.style.removeProperty('background')
+        el.style.removeProperty('background-color')
+        el.style.backgroundColor = backgroundColor
+      }
+      if (backgroundImage !== undefined) {
+        el.style.removeProperty('background-image')
+        el.style.backgroundImage = backgroundImage
+      }
+      if (opacity !== undefined) {
+        el.style.removeProperty('opacity')
+        el.style.opacity = opacity
+      }
+      if (boxShadow !== undefined) {
+        el.style.removeProperty('box-shadow')
+        el.style.boxShadow = boxShadow
+      }
+      if (backdropFilter !== undefined) {
+        el.style.removeProperty('backdrop-filter')
+        el.style.backdropFilter = backdropFilter
+      }
+      if (webkitBackdropFilter !== undefined) {
+        el.style.removeProperty('-webkit-backdrop-filter')
+        el.style.webkitBackdropFilter = webkitBackdropFilter
+      }
     }
   )
   if (saved?.scrollParent) {
@@ -5251,10 +5387,17 @@ async function renderWithHtml2Canvas(element, scale, { cardGridBlurBakes } = {})
       if (isCardGridExportRoot(element)) {
         fixCardGridExports(element, clonedRoot, clonedDoc, cardGridBlurBakes)
       }
+      /* 글래스/기본 태그형만 클론 보정 — 단색·불릿 제거 (레트로·타 탭 미적용) */
       if (element.hasAttribute('data-tag-export-root')) {
-        fixTagBlockExportClone(element, clonedRoot)
+        const tagUi = getLiveUiStyle()
+        if (tagUi === 'glass' || tagUi === 'default') {
+          fixTagBlockExportClone(element, clonedRoot)
+        }
       }
       sanitizeClonedColors(clonedRoot)
+      if (element.hasAttribute('data-tag-export-root')) {
+        nudgeTagExportTextInClone(clonedRoot)
+      }
     }
   })
 }
@@ -6930,9 +7073,9 @@ function expandTagBlockScrolls(block, saved) {
       overflow: el.style.overflow,
       overflowY: el.style.overflowY
     })
-    el.style.height = `${Math.max(el.scrollHeight, el.offsetHeight)}px`
+    el.style.setProperty('overflow', 'visible', 'important')
+    el.style.setProperty('height', 'auto', 'important')
     el.style.maxHeight = 'none'
-    el.style.overflow = 'visible'
     el.style.overflowY = 'visible'
   })
 }
@@ -7051,9 +7194,15 @@ function restoreTagRowExportLayout(root, saved) {
   })
   saved.scrollEls?.forEach(({ el, height, maxHeight, overflow, overflowY }) => {
     if (!el) return
-    if (height !== undefined) el.style.height = height
+    if (height !== undefined) {
+      el.style.removeProperty('height')
+      el.style.height = height
+    }
     if (maxHeight !== undefined) el.style.maxHeight = maxHeight
-    if (overflow !== undefined) el.style.overflow = overflow
+    if (overflow !== undefined) {
+      el.style.removeProperty('overflow')
+      el.style.overflow = overflow
+    }
     if (overflowY !== undefined) el.style.overflowY = overflowY
   })
   saved.blockHeights?.forEach(({ el, height, minHeight }) => {
@@ -7063,9 +7212,15 @@ function restoreTagRowExportLayout(root, saved) {
   })
   saved.scrollNodes?.forEach(({ el, scrollTop, height, maxHeight, overflow, overflowY }) => {
     if (!el) return
-    if (height !== undefined) el.style.height = height
+    if (height !== undefined) {
+      el.style.removeProperty('height')
+      el.style.height = height
+    }
     if (maxHeight !== undefined) el.style.maxHeight = maxHeight
-    if (overflow !== undefined) el.style.overflow = overflow
+    if (overflow !== undefined) {
+      el.style.removeProperty('overflow')
+      el.style.overflow = overflow
+    }
     if (overflowY !== undefined) el.style.overflowY = overflowY
     if (scrollTop !== undefined) el.scrollTop = scrollTop
   })
@@ -7078,6 +7233,9 @@ function restoreTagRowExportLayout(root, saved) {
   }
   if (saved.rootLayout) {
     Object.entries(saved.rootLayout).forEach(([key, value]) => {
+      if (key === 'height' || key === 'overflow') {
+        root.style.removeProperty(key === 'height' ? 'height' : 'overflow')
+      }
       root.style[key] = value
     })
   }

@@ -74,7 +74,8 @@ function writeThemeSnapshot(settings) {
         customTheme: settings.customTheme,
         fontId: settings.fontId,
         fontSize: settings.fontSize,
-        uiScale: settings.uiScale
+        uiScale: settings.uiScale,
+        borderWidth: settings.borderWidth
       })
     )
   } catch {

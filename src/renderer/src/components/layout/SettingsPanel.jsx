@@ -769,6 +769,23 @@ export default function SettingsPanel() {
         </section>
 
         <section>
+          <h3 className="mb-2 text-sm font-medium">
+            테두리 굵기 (
+            {(settings.borderWidth ?? 1) === 0 ? '없음' : `${settings.borderWidth ?? 1}px`})
+          </h3>
+          <input
+            type="range"
+            min={0}
+            max={5}
+            step={1}
+            value={settings.borderWidth ?? 1}
+            onChange={(e) => updateSettings({ borderWidth: Number(e.target.value) })}
+            className="w-full"
+            {...noDragProps}
+          />
+        </section>
+
+        <section>
           <h3 className="mb-2 text-sm font-medium">프리셋 설정</h3>
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
             <div className="grid grid-cols-4 gap-1">
