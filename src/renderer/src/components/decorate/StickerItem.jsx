@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
+import { getStickerFrameClipStyle } from '../../utils/stickerFrame'
 import { getStickerImageStyle } from '../../utils/stickerStyle'
 import { resolveStickerDisplayPosition, withAnchorRatios, clampStickerToWindow } from '../../utils/stickerHelpers'
 import {
@@ -7,6 +8,7 @@ import {
   setSelectedStickerId,
   subscribeSelectedSticker
 } from '../../utils/stickerSelectionStore'
+import StickerFrameClipDefs from './StickerFrameClipDefs'
 import StickerTransformHandles from './StickerTransformHandles'
 
 const DRAG_THRESHOLD_PX = 4
@@ -56,7 +58,13 @@ function StickerItem({
 
   const applyFullStyle = (width) => {
     const img = imgRef.current
-    if (img) Object.assign(img.style, getStickerImageStyle(sticker, width ?? sticker.width))
+    if (!img) return
+    const frameStyle = getStickerFrameClipStyle(sticker.id, sticker.frameShape)
+    Object.assign(img.style, getStickerImageStyle(sticker, width ?? sticker.width), frameStyle || {})
+    if (!frameStyle) {
+      img.style.clipPath = ''
+      img.style.webkitClipPath = ''
+    }
   }
 
   const syncDom = (data, { lite = false } = {}) => {
@@ -124,6 +132,7 @@ function StickerItem({
     sticker.borderCustomColor,
     sticker.blendMode,
     sticker.opacity,
+    sticker.frameShape,
     sticker.offsetRightRatio,
     sticker.offsetBottomRatio,
     layerIndex,
@@ -396,7 +405,11 @@ function StickerItem({
     }
   }, [])
 
-  const imageStyle = getStickerImageStyle(sticker)
+  const frameClipStyle = getStickerFrameClipStyle(sticker.id, sticker.frameShape)
+  const imageStyle = {
+    ...getStickerImageStyle(sticker),
+    ...(frameClipStyle || {})
+  }
   const showHandles = selected && editable
 
   if (!display.visible) return null
@@ -431,6 +444,7 @@ function StickerItem({
         className="relative"
         style={{ transform: `rotate(${sticker.rotation || 0}deg)` }}
       >
+        {/* 선택 틀·핸들은 클립 바깥 — 이미지에만 frame 마스킹 */}
         <div
           data-sticker-select-frame={showHandles ? '' : undefined}
           className="relative inline-block"
@@ -442,6 +456,7 @@ function StickerItem({
                 : undefined
           }
         >
+          <StickerFrameClipDefs stickerId={sticker.id} frameShape={sticker.frameShape} />
           <img
             ref={imgRef}
             src={sticker.src}

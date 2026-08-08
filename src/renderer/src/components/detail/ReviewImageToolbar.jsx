@@ -1,15 +1,39 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Crop } from 'lucide-react'
+import { ChevronDown, ChevronUp, Crop } from 'lucide-react'
 
 const overlayRoot = document.getElementById('overlay-root')
+
+/** 빈 텍스트 노드를 건너뛰고 형제 기준으로 이미지 순서 이동 */
+function moveReviewImageByStep(img, direction) {
+  if (!img?.parentNode) return false
+  if (direction < 0) {
+    let prev = img.previousSibling
+    while (prev && prev.nodeType === Node.TEXT_NODE && !String(prev.textContent || '').trim()) {
+      prev = prev.previousSibling
+    }
+    if (!prev) return false
+    img.parentNode.insertBefore(img, prev)
+    return true
+  }
+  let next = img.nextSibling
+  while (next && next.nodeType === Node.TEXT_NODE && !String(next.textContent || '').trim()) {
+    next = next.nextSibling
+  }
+  if (!next) return false
+  img.parentNode.insertBefore(next, img)
+  return true
+}
 
 export default function ReviewImageToolbar({ img, onContentChange, onCrop }) {
   const [rect, setRect] = useState(null)
   const resizeRef = useRef(null)
 
   const updateRect = useCallback(() => {
-    if (!img?.isConnected) return
+    if (!img?.isConnected) {
+      setRect(null)
+      return
+    }
     setRect(img.getBoundingClientRect())
   }, [img])
 
@@ -51,10 +75,53 @@ export default function ReviewImageToolbar({ img, onContentChange, onCrop }) {
     }
   }, [img, onContentChange, updateRect])
 
+  const handleMove = (direction) => {
+    if (!img?.isConnected) return
+    if (!moveReviewImageByStep(img, direction)) return
+    // 레이아웃 반영 후 오버레이 재배치
+    requestAnimationFrame(() => {
+      updateRect()
+      onContentChange?.()
+    })
+  }
+
   if (!img || !rect || !overlayRoot) return null
+
+  const barTop = Math.max(4, rect.top - 34)
 
   return createPortal(
     <div data-review-img-ui style={{ WebkitAppRegion: 'no-drag' }}>
+      <div
+        className="fixed z-[100002] flex items-center gap-0.5 rounded-md border border-white/40 bg-black/70 p-0.5 text-white shadow"
+        style={{ left: rect.left, top: barTop }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          title="위로"
+          onClick={(e) => {
+            e.stopPropagation()
+            handleMove(-1)
+          }}
+          className="flex h-7 items-center gap-0.5 rounded px-1.5 text-[11px] hover:bg-white/15"
+        >
+          <ChevronUp size={13} />
+          위로
+        </button>
+        <button
+          type="button"
+          title="아래로"
+          onClick={(e) => {
+            e.stopPropagation()
+            handleMove(1)
+          }}
+          className="flex h-7 items-center gap-0.5 rounded px-1.5 text-[11px] hover:bg-white/15"
+        >
+          <ChevronDown size={13} />
+          아래로
+        </button>
+      </div>
       <button
         type="button"
         title="크롭"

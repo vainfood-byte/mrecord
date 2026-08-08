@@ -191,7 +191,8 @@ export function createPetitSticker({
     opacity: 1,
     shadowEnabled: true,
     borderColor: null,
-    borderCustomColor: null
+    borderCustomColor: null,
+    frameShape: null
   }
   const bw = boxW ?? 0
   const bh = boxH ?? 0
@@ -256,6 +257,7 @@ export function createSticker({
     borderCustomColor: null,
     blendMode: 'normal',
     framed: false,
+    frameShape: null,
     tabId: null
   }
 }

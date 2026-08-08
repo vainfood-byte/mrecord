@@ -25,6 +25,7 @@ import {
   applyEditorFontFamily,
   applyEditorBackgroundColor
 } from '../../utils/reviewFormatHelpers'
+import { compressReviewImageFile } from '../../utils/reviewImageCompress'
 
 function TextColorIcon({ color }) {
   return (
@@ -262,31 +263,19 @@ function EditBox({
     const imageFiles = Array.from(fileList).filter((file) => file.type.startsWith('image/'))
     if (!imageFiles.length) return
 
-    Promise.all(
-      imageFiles.map(
-        (file) =>
-          new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = () => {
-              if (typeof reader.result === 'string') resolve(reader.result)
-              else reject(new Error('invalid image'))
-            }
-            reader.onerror = () => reject(reader.error)
-            reader.readAsDataURL(file)
-          })
-      )
-    )
+    Promise.all(imageFiles.map(compressReviewImageFile))
       .then((results) => {
-        if (!results.length) return
+        const urls = results.filter((u) => typeof u === 'string')
+        if (!urls.length) return
         const editor = editorRef.current
         if (editor) {
           restoreEditorSelection()
-          for (const dataUrl of results) {
+          for (const dataUrl of urls) {
             insertImageAtCursor(editor, dataUrl)
           }
         }
         // 저장 데이터(images) 동기화 — Ctrl+V / 본문 드롭과 동일
-        onImagesChange?.([...new Set([...(images || []), ...results])])
+        onImagesChange?.([...new Set([...(images || []), ...urls])])
         onContentChange?.()
       })
       .catch(() => {})

@@ -2,6 +2,7 @@
 
 import { isWeekInMonthGrid, weekStartKey } from './calendarHelpers'
 import { resolveAnchoredPosition } from './stickerHelpers'
+import { applyFrameClipToCanvas } from './stickerFrame'
 import { getThemeColors, hexToRgba } from './colorUtils'
 import {
   isExportBackgroundActive,
@@ -5525,6 +5526,8 @@ async function drawPetitStickerOnCanvas(ctx, sticker, boxW, boxH, canvasScale, s
     ctx.shadowOffsetY = 4 * canvasScale
   }
 
+  // 프레임 마스킹: CSS clip-path와 동일한 path로 Canvas clip (export 안전)
+  applyFrameClipToCanvas(ctx, sticker.frameShape, dw, dh, -dw / 2, -dh / 2)
   ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh)
   ctx.restore()
 }
@@ -5691,6 +5694,7 @@ async function compositeOverlayStickers(canvas, rootEl, stickers) {
             ctx.save()
             ctx.translate(x + w / 2, y + h / 2)
             ctx.rotate(((sticker.rotation || 0) * Math.PI) / 180)
+            applyFrameClipToCanvas(ctx, sticker.frameShape, w, h, -w / 2, -h / 2)
             ctx.drawImage(img, -w / 2, -h / 2, w, h)
             ctx.restore()
             resolve()

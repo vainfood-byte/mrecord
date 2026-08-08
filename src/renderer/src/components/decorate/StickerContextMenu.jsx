@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../context/AppContext'
 import { fitMenuPosition, resolveStickerDisplayPosition, withAnchorRatios } from '../../utils/stickerHelpers'
+import StickerFrameSubmenu from './StickerFrameSubmenu'
 import StickerStyleMenuSection from './StickerStyleMenuSection'
 
 const LAYER_ITEMS = [
@@ -196,6 +197,18 @@ export default function StickerContextMenu({
             payload: { id: stickerId, data, skipPresetSync: true }
           })
         }
+      />
+
+      <div className="my-1 border-t border-[var(--color-border)]" />
+      <StickerFrameSubmenu
+        current={sticker.frameShape}
+        onSelect={(frameShape) => {
+          dispatch({
+            type: 'UPDATE_STICKER',
+            payload: { id: stickerId, data: { frameShape } }
+          })
+          dispatch({ type: 'SET_STICKER_CONTEXT_MENU', payload: null })
+        }}
       />
 
       {OTHER_ITEMS.map((item, i) =>

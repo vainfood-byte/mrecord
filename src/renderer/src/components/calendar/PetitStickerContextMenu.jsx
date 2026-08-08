@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../context/AppContext'
 import { fitMenuPosition } from '../../utils/stickerHelpers'
+import StickerFrameSubmenu from '../decorate/StickerFrameSubmenu'
 import StickerStyleMenuSection from '../decorate/StickerStyleMenuSection'
 import { convertPetitStickerCoords } from './PetitStickerLayer'
 
@@ -126,6 +127,17 @@ export default function PetitStickerContextMenu({ stickerId, x, y, getScrollMetr
         onUpdate={(data) =>
           dispatch({ type: 'UPDATE_PETIT_STICKER', payload: { id: stickerId, data } })
         }
+      />
+      <div className="my-1 border-t border-[var(--color-border)]" />
+      <StickerFrameSubmenu
+        current={sticker.frameShape}
+        onSelect={(frameShape) => {
+          dispatch({
+            type: 'UPDATE_PETIT_STICKER',
+            payload: { id: stickerId, data: { frameShape } }
+          })
+          onClose()
+        }}
       />
       <button
         type="button"

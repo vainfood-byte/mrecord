@@ -2,7 +2,9 @@ import { memo, useEffect, useRef } from 'react'
 
 import { useApp } from '../../context/AppContext'
 import { clampInBox, resolveAnchoredPosition, withAnchorRatios } from '../../utils/stickerHelpers'
+import { getStickerFrameClipStyle } from '../../utils/stickerFrame'
 import { getStickerImageStyle } from '../../utils/stickerStyle'
+import StickerFrameClipDefs from '../decorate/StickerFrameClipDefs'
 import StickerTransformHandles from '../decorate/StickerTransformHandles'
 
 import { petitStickerDisplayY } from './PetitStickerLayer'
@@ -32,7 +34,13 @@ function PetitStickerItem({
 
   const applyFullStyle = (width) => {
     const img = imgRef.current
-    if (img) Object.assign(img.style, getStickerImageStyle(sticker, width ?? sticker.width))
+    if (!img) return
+    const frameStyle = getStickerFrameClipStyle(sticker.id, sticker.frameShape)
+    Object.assign(img.style, getStickerImageStyle(sticker, width ?? sticker.width), frameStyle || {})
+    if (!frameStyle) {
+      img.style.clipPath = ''
+      img.style.webkitClipPath = ''
+    }
   }
 
   const boxW = bounds?.width ?? 0
@@ -109,6 +117,7 @@ function PetitStickerItem({
     sticker.borderColor,
     sticker.borderCustomColor,
     sticker.opacity,
+    sticker.frameShape,
     sticker.pinned,
     layerIndex,
     bounds,
@@ -378,7 +387,11 @@ function PetitStickerItem({
     }
   }, [])
 
-  const imageStyle = getStickerImageStyle(sticker)
+  const frameClipStyle = getStickerFrameClipStyle(sticker.id, sticker.frameShape)
+  const imageStyle = {
+    ...getStickerImageStyle(sticker),
+    ...(frameClipStyle || {})
+  }
   const showHandles = selected && !sticker.locked && !sticker.pinned
 
   return (
@@ -410,6 +423,7 @@ function PetitStickerItem({
         className="relative"
         style={{ transform: `rotate(${sticker.rotation || 0}deg)` }}
       >
+        {/* 선택 틀·핸들은 클립 바깥 — 이미지에만 frame 마스킹 */}
         <div
           data-sticker-select-frame={selected ? '' : undefined}
           className="relative inline-block"
@@ -419,6 +433,7 @@ function PetitStickerItem({
               : undefined
           }
         >
+          <StickerFrameClipDefs stickerId={sticker.id} frameShape={sticker.frameShape} />
           <img
             ref={imgRef}
             src={sticker.src}

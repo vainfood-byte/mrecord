@@ -15,6 +15,10 @@ import { createReviewContentSaver } from '../../utils/reviewContentSaver'
 import { FLUSH_PENDING_SAVES_EVENT } from '../../utils/storage'
 import { insertTextAtCursor as insertTextIntoEditor } from '../../utils/insertTextAtCursor'
 import { hydrateRecord } from '../../utils/recordHeavyStore'
+import {
+  compressReviewImageDataUrl,
+  compressReviewImageFile
+} from '../../utils/reviewImageCompress'
 
 /** 본문 이미지 리플로우 병목 차단 — GPU 레이어 분리 */
 function applyReviewImgPerfStyle(img) {
@@ -73,19 +77,6 @@ function insertImageAtCursor(editor, dataUrl) {
     }
   }
   editor.appendChild(img)
-}
-
-/** 본문 파일 드롭용 — EditBox/Ctrl+V 경로와 분리된 로컬 헬퍼 */
-function readImageFileAsDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') resolve(reader.result)
-      else reject(new Error('invalid image'))
-    }
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(file)
-  })
 }
 
 function dataTransferHasFiles(dt) {
@@ -177,6 +168,8 @@ function ReviewEditor({
   const isComposingRef = useRef(false)
   const isEditingRef = useRef(false)
   const imgDragRef = useRef(null)
+  /** 본문 이미지 드래그 중 가로 삽입 표시선 (DOM 직접 조작 — 드래그 중 setState 렉 방지) */
+  const dropIndicatorRef = useRef(null)
   /** 본문 이미지 더블탭(펜/마우스) — 타임스탬프·좌표 허용 + 이중 오픈 방지 */
   const imgDblTapRef = useRef({ img: null, time: 0, x: 0, y: 0, openedAt: 0 })
   /** 편집 중 최신 본문 HTML — [저장] 시 editor DOM과 함께 사용 */
@@ -372,11 +365,13 @@ function ReviewEditor({
           e.preventDefault()
           const file = item.getAsFile()
           if (!file) continue
-          const reader = new FileReader()
-          reader.onload = () => {
-            if (typeof reader.result === 'string') addImage(reader.result, true)
-          }
-          reader.readAsDataURL(file)
+          compressReviewImageFile(file)
+            .then((dataUrl) => {
+              if (typeof dataUrl === 'string' && isEditingRef.current) {
+                addImage(dataUrl, true)
+              }
+            })
+            .catch(() => {})
           return
         }
       }
@@ -390,9 +385,57 @@ function ReviewEditor({
     const editor = editorRef.current
     if (!editor) return
 
+    const ensureDropIndicator = () => {
+      if (dropIndicatorRef.current?.isConnected) return dropIndicatorRef.current
+      const host = document.getElementById('overlay-root') || document.body
+      const el = document.createElement('div')
+      el.setAttribute('data-review-drop-indicator', '')
+      el.setAttribute('data-review-img-ui', '')
+      el.style.cssText = [
+        'position:fixed',
+        'z-index:100003',
+        'height:2px',
+        'pointer-events:none',
+        'display:none',
+        'border-radius:1px',
+        'background:var(--color-accent)',
+        'box-shadow:0 0 0 1px rgba(255,255,255,0.55)'
+      ].join(';')
+      host.appendChild(el)
+      dropIndicatorRef.current = el
+      return el
+    }
+
+    const hideDropIndicator = () => {
+      const el = dropIndicatorRef.current
+      if (el) el.style.display = 'none'
+    }
+
+    const updateDropIndicator = (clientX, clientY) => {
+      const el = ensureDropIndicator()
+      const range = document.caretRangeFromPoint?.(clientX, clientY)
+      if (!range || !editor.contains(range.startContainer)) {
+        el.style.display = 'none'
+        return
+      }
+      const caretRect = range.getBoundingClientRect()
+      const editorRect = editor.getBoundingClientRect()
+      const pad = 16
+      const left = editorRect.left + pad
+      const width = Math.max(24, editorRect.width - pad * 2)
+      let top = caretRect.top
+      if (!caretRect.height && !caretRect.width) top = clientY
+      el.style.display = 'block'
+      el.style.left = `${left}px`
+      el.style.top = `${Math.round(top)}px`
+      el.style.width = `${width}px`
+    }
+
     const moveImgToPoint = (img, clientX, clientY) => {
       const range = document.caretRangeFromPoint?.(clientX, clientY)
-      if (!range || !editor.contains(range.startContainer)) return
+      if (!range || !editor.contains(range.startContainer)) return false
+      /* 드롭 지점이 자기 자신이면 이동 생략 */
+      if (range.startContainer === img || img.contains?.(range.startContainer)) return false
       img.remove()
       range.insertNode(img)
       range.setStartAfter(img)
@@ -400,6 +443,7 @@ function ReviewEditor({
       const sel = window.getSelection()
       sel?.removeAllRanges()
       sel?.addRange(range)
+      return true
     }
 
     const openReviewImageViewer = (img) => {
@@ -411,6 +455,7 @@ function ReviewEditor({
       const index = Math.max(0, imgs.indexOf(img))
       if (!imgs.length || index < 0) return
       imgDblTapRef.current = { img: null, time: 0, x: 0, y: 0, openedAt: now }
+      hideDropIndicator()
       setSelectedImg(null)
       setCropSrc(null)
       /* Base64 URL 배열을 state에 넣지 않음 — index만 보관, src는 DOM에서 resolve */
@@ -433,6 +478,7 @@ function ReviewEditor({
         if (prev.img === tapImg && dt <= 300 && dist <= 10) {
           e.preventDefault()
           imgDragRef.current = null
+          hideDropIndicator()
           openReviewImageViewer(tapImg)
           return
         }
@@ -469,21 +515,36 @@ function ReviewEditor({
       if (!d.moved && (Math.abs(e.clientX - d.startX) > 6 || Math.abs(e.clientY - d.startY) > 6)) {
         d.moved = true
         e.preventDefault()
+        /* 드래그 시작 즉시 크기조절/크롭 오버레이 unmount — 잔상 방지 */
+        setSelectedImg(null)
         d.img.style.opacity = '0.55'
         d.img.style.cursor = 'grabbing'
         // 드래그로 판정되면 더블탭 후보 무효화
         imgDblTapRef.current = { ...imgDblTapRef.current, img: null, time: 0 }
+        updateDropIndicator(e.clientX, e.clientY)
+        return
+      }
+      if (d.moved) {
+        e.preventDefault()
+        updateDropIndicator(e.clientX, e.clientY)
       }
     }
 
     const onPointerUp = (e) => {
       const d = imgDragRef.current
       if (!d) return
+      hideDropIndicator()
       d.img.style.opacity = ''
       d.img.style.cursor = 'pointer'
-      if (d.moved) moveImgToPoint(d.img, e.clientX, e.clientY)
       imgDragRef.current = null
-      if (d.moved) scheduleContentSave()
+      if (d.moved) {
+        moveImgToPoint(d.img, e.clientX, e.clientY)
+        scheduleContentSave()
+        /* 새 위치 이미지에만 오버레이 재연결 */
+        requestAnimationFrame(() => {
+          if (d.img?.isConnected && isEditingRef.current) setSelectedImg(d.img)
+        })
+      }
     }
 
     const onDblClick = (e) => {
@@ -498,6 +559,9 @@ function ReviewEditor({
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp)
     return () => {
+      hideDropIndicator()
+      dropIndicatorRef.current?.remove()
+      dropIndicatorRef.current = null
       editor.removeEventListener('pointerdown', onPointerDown)
       editor.removeEventListener('dblclick', onDblClick)
       window.removeEventListener('pointermove', onPointerMove)
@@ -872,15 +936,16 @@ function ReviewEditor({
       : []
 
     if (imageFiles.length) {
-      Promise.all(imageFiles.map(readImageFileAsDataURL))
+      Promise.all(imageFiles.map(compressReviewImageFile))
         .then((results) => {
-          if (!results.length || !isEditingRef.current || !editorRef.current) return
-          for (const dataUrl of results) {
+          const urls = results.filter((u) => typeof u === 'string')
+          if (!urls.length || !isEditingRef.current || !editorRef.current) return
+          for (const dataUrl of urls) {
             insertImageAtCursor(editorRef.current, dataUrl)
           }
           // 편집박스 목록과 동기화 → 저장 시 미사용 이미지 정리 로직과 호환
           const prev = stableChapterImagesRef.current || []
-          const images = [...new Set([...prev, ...results])]
+          const images = [...new Set([...prev, ...urls])]
           stableChapterImagesRef.current = images
           saveReviewRef.current?.({ images })
           scheduleContentSave()
@@ -892,8 +957,13 @@ function ReviewEditor({
     // 2) 기존 편집박스 → 본문 text/plain 드롭 (동작 유지)
     const src = e.dataTransfer.getData('text/plain')
     if (!src) return
-    insertImageAtCursor(editor, src)
-    addImage(src, false)
+    compressReviewImageDataUrl(src)
+      .then((dataUrl) => {
+        if (!dataUrl || !isEditingRef.current || !editorRef.current) return
+        insertImageAtCursor(editorRef.current, dataUrl)
+        addImage(dataUrl, false)
+      })
+      .catch(() => {})
   }
 
   const handleExport = async () => {
